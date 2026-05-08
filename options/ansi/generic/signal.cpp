@@ -14,7 +14,7 @@ __sighandler signal(int sn, __sighandler handler) {
 	struct sigaction old;
 	if(int e = mlibc::sysdep_or_enosys<Sigaction>(sn, &sa, &old)){
 		errno = e;
-		return SIG_ERR;
+		return reinterpret_cast<__sighandler>(SIG_ERR);
 	}
 	return old.sa_handler;
 }

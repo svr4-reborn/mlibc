@@ -92,16 +92,19 @@ all_test_cases = [
 	'posix/posix_spawn',
 	'posix/index',
 	'posix/rindex',
+	'posix/getresid',
 	'posix/search',
 	'posix/semaphore',
 	'posix/open_memstream',
 	'posix/popen',
 	'posix/system', # This test should be in the ANSI tests, but it depends on sys/wait.h
+	'posix/dup3',
 	'posix/sigsuspend',
 	'posix/sigaltstack',
 	'posix/time',
 	'posix/realpath',
 	'posix/ffs',
+	'posix/waitid_intr',
 	'posix/getcwd',
 	'posix/memrchr',
 	'posix/wordexp',
@@ -128,6 +131,7 @@ all_test_cases = [
 	'posix/usershell',
 	'posix/shm',
 	'posix/swab',
+	'posix/pselect',
 	'posix/select',
 	'posix/wcsdup',
 	'posix/wcsncasecmp',
@@ -242,6 +246,13 @@ test_objects = []
 test_link_args = []
 test_c_args = ['-D_GNU_SOURCE', '-U__MLIBC_DEBUG', '-U__MLIBC_BUILDING_MLIBC', '-fhosted', '-fno-builtin']
 use_pie = false
+test_dynamic_linker = meson.global_build_root() + '/ld.so'
+test_build_rpath = meson.global_build_root()
+
+if host_machine.system() == 'svr4'
+	test_dynamic_linker = '/lib/ld.so'
+	test_build_rpath = ''
+endif
 
 host_test_c_args = ['-fno-builtin']
 
@@ -321,7 +332,7 @@ else
 		link_with: libc_shared,
 		dependencies: [libc_deps, rtlib_deps]
 	)
-	test_link_args += ['-Wl,--dynamic-linker=' + meson.global_build_root() + '/ld.so']
+	test_link_args += ['-Wl,--dynamic-linker=' + test_dynamic_linker]
 
 	if host_machine.system() in ['linux']
 		use_pie = true
@@ -364,7 +375,7 @@ foreach test_name : all_test_cases
 	exec = executable(test_exec_name, [test_name + '.c', test_sources],
 		dependencies: libc_dep,
 		objects: test_objects,
-		build_rpath: meson.global_build_root(),
+		build_rpath: test_build_rpath,
 		override_options: test_override_options,
 		c_args: mlibc_c_args + test_c_args,
 		link_args: mlibc_link_args + test_link_args,

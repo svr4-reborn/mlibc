@@ -7,7 +7,7 @@
 # define __undef_LINUX_TYPES_H
 #endif
 
-#include <linux/kd.h>
+#include <abi-bits/kd.h>
 
 #ifdef __undef_LINUX_TYPES_H
 # undef _LINUX_TYPES_H

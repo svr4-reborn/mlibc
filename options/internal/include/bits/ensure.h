@@ -8,7 +8,7 @@ extern "C" {
 
 #ifndef __MLIBC_ABI_ONLY
 
-void __ensure_fail(const char *assertion, const char *file, unsigned int line,
+__attribute__((__noreturn__)) void __ensure_fail(const char *assertion, const char *file, unsigned int line,
 		const char *function);
 
 void __ensure_warn(const char *assertion, const char *file, unsigned int line,

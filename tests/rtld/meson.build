@@ -23,7 +23,7 @@ rtld_test_cases = [
 	'no-dt_symbolic',
 ]
 
-if host_machine.cpu_family() != 'm68k'
+if host_machine.cpu_family() != 'm68k' and host_machine.system() != 'svr4'
 	rtld_test_cases += [
 		'ifunc',
 		'ifunc-dlopen',
@@ -37,8 +37,12 @@ host_libc_rtld_nosan_test_cases = [
 py = import('python').find_installation('python3')
 
 foreach test_name : rtld_test_cases
-	test_rpath = meson.global_build_root() / 'tests' / 'rtld' / test_name / ''
-	test_rpath += ':$ORIGIN/' # Workaround old and buggy qemu-user on CI
+	if host_machine.system() == 'svr4'
+		test_rpath = '$ORIGIN/' + test_name + '/:$ORIGIN/'
+	else
+		test_rpath = meson.global_build_root() / 'tests' / 'rtld' / test_name / ''
+		test_rpath += ':$ORIGIN/' # Workaround old and buggy qemu-user on CI
+	endif
 
 	test_env = []
 	test_link_with = []

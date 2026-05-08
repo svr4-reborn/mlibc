@@ -74,6 +74,8 @@ struct Sleep {};
 // // zero (and not one) to indicate that the file is a terminal.
 // int sys_isatty(int fd);
 struct Isatty {};
+// int sys_isastream(int fd);
+struct Isastream {};
 // int sys_rmdir(const char *path);
 struct Rmdir {};
 // int sys_unlinkat(int dirfd, const char *path, int flags);
@@ -490,6 +492,8 @@ struct Sysconf {};
 struct Semget {};
 // int sys_semctl(int semid, int semnum, int cmd, void *semun, int *ret);
 struct Semctl {};
+// int sys_semop(int semid, struct sembuf *sops, size_t nsops);
+struct Semop {};
 // int sys_getaffinity(pid_t pid, size_t cpusetsize, cpu_set_t *mask);
 struct GetAffinity {};
 // int sys_getthreadaffinity(pid_t tid, size_t cpusetsize, cpu_set_t *mask);

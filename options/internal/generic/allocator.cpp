@@ -91,11 +91,13 @@ void *MemoryAllocator::allocate(size_t size) {
 
 	// Two extra pages for metadata in front and guard page at the end
 	// Reserve the whole region as PROT_NONE...
-	if (int e = mlibc::sysdep<VmMap>(nullptr, pg_size + pageSize * 2, PROT_NONE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0, &ptr))
+	if (int e = mlibc::sysdep<VmMap>(nullptr, pg_size + pageSize * 2, PROT_NONE,
+			MAP_ANONYMOUS | MAP_PRIVATE | MAP_NORESERVE, -1, 0, &ptr))
 		mlibc::panicLogger() << "sys_vm_map failed in MemoryAllocator::allocate (errno " << e << ")" << frg::endlog;
 
 	// ...Then replace pages to make them accessible, excluding the guard page
-	if (int e = mlibc::sysdep<VmMap>(ptr, pg_size + pageSize, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED, -1, 0, &ptr))
+	if (int e = mlibc::sysdep<VmMap>(ptr, pg_size + pageSize, PROT_READ | PROT_WRITE,
+			MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED | MAP_NORESERVE, -1, 0, &ptr))
 		mlibc::panicLogger() << "sys_vm_map failed in MemoryAllocator::allocate (errno " << e << ")" << frg::endlog;
 
 	void *meta = ptr;
@@ -152,7 +154,8 @@ void MemoryAllocator::deallocate(void *ptr, size_t size) {
 
 	if constexpr (neverReleaseVa) {
 		void *unused;
-		if (int e = mlibc::sysdep<VmMap>(meta, meta->pagesSize + pageSize * 2, PROT_NONE, MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED, -1, 0, &unused))
+		if (int e = mlibc::sysdep<VmMap>(meta, meta->pagesSize + pageSize * 2, PROT_NONE,
+				MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED | MAP_NORESERVE, -1, 0, &unused))
 			mlibc::panicLogger() << "sys_vm_map failed in MemoryAllocator::deallocate (errno " << e << ")" << frg::endlog;
 	} else {
 		if (int e = mlibc::sysdep<VmUnmap>(meta, meta->pagesSize + pageSize * 2))

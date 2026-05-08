@@ -13,6 +13,7 @@ extern "C" {
 #include <bits/glibc/glibc_icmp6.h>
 #endif /* __MLIBC_GLIBC_OPTION */
 
+#ifdef AF_INET6
 #define ICMP6_FILTER 1
 
 #define ICMP6_DST_UNREACH 1
@@ -206,6 +207,7 @@ struct nd_opt_home_agent_info {
 	uint16_t nd_opt_home_agent_info_preference;
 	uint16_t nd_opt_home_agent_info_lifetime;
 };
+#endif
 
 #ifdef __cplusplus
 }

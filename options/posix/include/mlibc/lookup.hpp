@@ -40,7 +40,9 @@ struct ai_buf {
 	struct addrinfo ai;
 	union sa {
 		struct sockaddr_in sin;
+		#ifdef AF_INET6
 		struct sockaddr_in6 sin6;
+		#endif
 	} sa;
 };
 

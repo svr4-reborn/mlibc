@@ -31,7 +31,11 @@ int openat(int dirfd, const char *pathname, int flags, ...) {
 	mode_t mode = 0;
 	int fd;
 
-	if((flags & O_CREAT || (flags & O_TMPFILE) == O_TMPFILE))
+	bool needs_mode = flags & O_CREAT;
+#ifdef O_TMPFILE
+	needs_mode = needs_mode || (flags & O_TMPFILE) == O_TMPFILE;
+#endif
+	if(needs_mode)
 		mode = va_arg(args, mode_t);
 
 	if(int e = mlibc::sysdep_or_enosys<Openat>(dirfd, pathname, flags, mode, &fd); e) {
@@ -56,7 +60,11 @@ int posix_fallocate(int fd, off_t offset, off_t size) {
 int open(const char *pathname, int flags, ...) {
 	mode_t mode = 0;
 
-	if ((flags & O_CREAT) || (flags & O_TMPFILE) == O_TMPFILE) {
+	bool needs_mode = flags & O_CREAT;
+#ifdef O_TMPFILE
+	needs_mode = needs_mode || (flags & O_TMPFILE) == O_TMPFILE;
+#endif
+	if(needs_mode) {
 		va_list args;
 		va_start(args, flags);
 		mode = va_arg(args, mode_t);

@@ -23,7 +23,9 @@
 extern "C" {
 #endif
 
+#ifndef O_NDELAY
 #define O_NDELAY O_NONBLOCK
+#endif
 
 /* WARNING: keep `flock` and `flock64` in sync or bad things will happen! */
 

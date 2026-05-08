@@ -32,10 +32,7 @@ pid_t wait(int *status) {
 }
 
 pid_t wait3(int *status, int options, struct rusage *rusage) {
-	(void) rusage;
-	mlibc::infoLogger() << "\e[31mmlibc: wait3() is not implemented correctly\e[39m"
-		<< frg::endlog;
-	return waitpid(-1, status, options);
+	return wait4(-1, status, options, rusage);
 }
 
 pid_t wait4(pid_t pid, int *status, int options, struct rusage *ru) {

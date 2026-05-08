@@ -7,6 +7,7 @@
 extern "C" {
 #endif
 
+#ifdef AF_INET6
 struct ip6_hdr {
 	union {
 		struct ip6_hdrctl {
@@ -22,6 +23,7 @@ struct ip6_hdr {
 };
 
 #define ip6_nxt ip6_ctlun.ip6_un1.ip6_un1_nxt
+#endif
 
 #ifdef __cplusplus
 }

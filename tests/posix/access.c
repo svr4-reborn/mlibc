@@ -20,6 +20,10 @@ int main() {
 	assert(access(TEST_FILE, W_OK) == -1);
 	assert(access(TEST_FILE, R_OK) == -1);
 	assert(access(TEST_FILE, X_OK) == -1);
+	assert(faccessat(AT_FDCWD, TEST_FILE, F_OK, AT_EACCESS) == -1);
+	assert(faccessat(AT_FDCWD, TEST_FILE, W_OK, AT_EACCESS) == -1);
+	assert(faccessat(AT_FDCWD, TEST_FILE, R_OK, AT_EACCESS) == -1);
+	assert(faccessat(AT_FDCWD, TEST_FILE, X_OK, AT_EACCESS) == -1);
 
 	close(open(TEST_FILE, O_CREAT | O_RDWR, 0666));
 
@@ -27,6 +31,10 @@ int main() {
 	assert(access(TEST_FILE, W_OK) == 0);
 	assert(access(TEST_FILE, R_OK) == 0);
 	assert(access(TEST_FILE, X_OK) == -1);
+	assert(faccessat(AT_FDCWD, TEST_FILE, F_OK, AT_EACCESS) == 0);
+	assert(faccessat(AT_FDCWD, TEST_FILE, W_OK, AT_EACCESS) == 0);
+	assert(faccessat(AT_FDCWD, TEST_FILE, R_OK, AT_EACCESS) == 0);
+	assert(faccessat(AT_FDCWD, TEST_FILE, X_OK, AT_EACCESS) == -1);
 
 	unlink(TEST_FILE);
 

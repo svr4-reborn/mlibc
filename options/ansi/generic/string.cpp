@@ -498,14 +498,18 @@ char *strerror(int e) {
 	case EALREADY: s = "Operation already in progress (EALREADY)"; break;
 	case EBADMSG: s = "Bad message (EBADMSG)"; break;
 	case EBUSY: s = "Device or resource busy (EBUSY)"; break;
+#ifdef ECANCELED
 	case ECANCELED: s = "Operation canceled (ECANCELED)"; break;
+#endif
 	case ECHILD: s = "No child processes (ECHILD)"; break;
 	case ECONNABORTED: s = "Software caused connection abort (ECONNABORTED)"; break;
 	case ECONNREFUSED: s = "Connection refused (ECONNREFUSED)"; break;
 	case ECONNRESET: s = "Connection reset by peer (ECONNRESET)"; break;
 	case EDEADLK: s = "Resource deadlock avoided (EDEADLK)"; break;
 	case EDESTADDRREQ: s = "Destination address required (EDESTADDRREQ)"; break;
+#ifdef EDQUOT
 	case EDQUOT: s = "Disk quota exceeded (EDQUOT)"; break;
+#endif
 	case EFBIG: s = "File too large (EFBIG)"; break;
 	case EHOSTUNREACH: s = "No route to host (EHOSTUNREACH)"; break;
 	case EIDRM: s = "Identifier removed (EIDRM)"; break;
@@ -528,7 +532,9 @@ char *strerror(int e) {
 	case ENOMSG: s = "No message of desired type (ENOMSG)"; break;
 	case ENOPROTOOPT: s = "Protocol not available (ENOPROTOOPT)"; break;
 	case ENOTEMPTY: s = "Directory not empty (ENOTEMPTY)"; break;
+#ifdef ENOTRECOVERABLE
 	case ENOTRECOVERABLE: s = "Sate not recoverable (ENOTRECOVERABLE)"; break;
+#endif
 	case ENOTSUP: s = "Operation not supported (ENOTSUP)"; break;
 	case ENOTTY: s = "Inappropriate ioctl for device (ENOTTY)"; break;
 	case EOVERFLOW: s = "Value too large for defined datatype (EOVERFLOW)"; break;
@@ -536,7 +542,9 @@ char *strerror(int e) {
 	/* these are aliases on the mlibc abi */
 	case EOPNOTSUPP: s = "Operation not supported (EOPNOTSUP)"; break;
 #endif
+#ifdef EOWNERDEAD
 	case EOWNERDEAD: s = "Owner died (EOWNERDEAD)"; break;
+#endif
 	case EPROTO: s = "Protocol error (EPROTO)"; break;
 	case EPROTONOSUPPORT: s = "Protocol not supported (EPROTONOSUPPORT)"; break;
 	case EPROTOTYPE: s = "Protocol wrong type for socket (EPROTOTYPE)"; break;
@@ -548,23 +556,33 @@ char *strerror(int e) {
 	case EXDEV: s = "Invalid cross-device link (EXDEV)"; break;
 	case ENODATA: s = "No data available (ENODATA)"; break;
 	case ETIME: s = "Timer expired (ETIME)"; break;
+#ifdef ENOKEY
 	case ENOKEY: s = "Required key not available (ENOKEY)"; break;
+#endif
 	case ESHUTDOWN: s = "Cannot send after transport endpoint shutdown (ESHUTDOWN)"; break;
 	case EHOSTDOWN: s = "Host is down (EHOSTDOWN)"; break;
 	case EBADFD: s = "File descriptor in bad state (EBADFD)"; break;
+#ifdef ENOMEDIUM
 	case ENOMEDIUM: s = "No medium found (ENOMEDIUM)"; break;
+#endif
 	case ENOTBLK: s = "Block device required (ENOTBLK)"; break;
 	case ENONET: s = "Machine is not on the network (ENONET)"; break;
 	case EPFNOSUPPORT: s = "Protocol family not supported (EPFNOSUPPORT)"; break;
 	case ESOCKTNOSUPPORT: s = "Socket type not supported (ESOCKTNOSUPPORT)"; break;
 	case ESTRPIPE: s = "Streams pipe error (ESTRPIPE)"; break;
 	case EREMOTEIO: s = "Remote I/O error (EREMOTEIO)"; break;
+#ifdef ERFKILL
 	case ERFKILL: s = "Operation not possible due to RF-kill (ERFKILL)"; break;
+#endif
 	case EBADR: s = "Invalid request descriptor (EBADR)"; break;
 	case EUNATCH: s = "Protocol driver not attached (EUNATCH)"; break;
+#ifdef EMEDIUMTYPE
 	case EMEDIUMTYPE: s = "Wrong medium type (EMEDIUMTYPE)"; break;
+#endif
 	case EREMOTE: s = "Object is remote (EREMOTE)"; break;
+#ifdef EKEYREJECTED
 	case EKEYREJECTED: s = "Key was rejected by service (EKEYREJECTED)"; break;
+#endif
 	case EUCLEAN: s = "Structure needs cleaning (EUCLEAN)"; break;
 	case EBADSLT: s = "Invalid slot (EBADSLT)"; break;
 	case ENOANO: s = "No anode (ENOANO)"; break;
@@ -572,7 +590,9 @@ char *strerror(int e) {
 	case ENOSTR: s = "Device not a stream (ENOSTR)"; break;
 	case ETOOMANYREFS: s = "Too many references: cannot splice (ETOOMANYREFS)"; break;
 	case ENOPKG: s = "Package not installed (ENOPKG)"; break;
+#ifdef EKEYREVOKED
 	case EKEYREVOKED: s = "Key has been revoked (EKEYREVOKED)"; break;
+#endif
 	case EXFULL: s = "Exchange full (EXFULL)"; break;
 	case ELNRNG: s = "Link number out of range (ELNRNG)"; break;
 	case ENOTUNIQ: s = "Name not unique on network (ENOTUNIQ)"; break;

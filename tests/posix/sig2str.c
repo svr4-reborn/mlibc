@@ -40,8 +40,10 @@ int main() {
 		SIGPOLL,
 		SIGPWR,
 		SIGSYS,
+	#if defined(SIGRTMIN) && defined(SIGRTMAX)
 		SIGRTMIN,
 		SIGRTMAX,
+	#endif
 		0
 	};
 
@@ -79,8 +81,10 @@ int main() {
 		"POLL",
 		"PWR",
 		"SYS",
+	#if defined(SIGRTMIN) && defined(SIGRTMAX)
 		"RTMIN",
 		"RTMAX",
+	#endif
 		0
 	};
 
@@ -96,6 +100,7 @@ int main() {
 		assert(outnum == sigs[i]);
 	}
 
+	#if defined(SIGRTMIN) && defined(SIGRTMAX)
 	char str[SIG2STR_MAX];
 	int ret = sig2str(SIGRTMIN + 2, str);
 	assert(ret == 0);
@@ -116,6 +121,11 @@ int main() {
 	assert(ret == -1);
 	ret = str2sig("RTMAX-1337", &outnum);
 	assert(ret == -1);
+	#else
+	char str[SIG2STR_MAX];
+	int ret;
+	int outnum = 0;
+	#endif
 
 	ret = sig2str(NSIG, str);
 	assert(ret == -1);

@@ -1,4 +1,5 @@
 
+#include <climits>
 #include <string.h>
 #include <sys/select.h>
 #include <unistd.h>
@@ -8,20 +9,22 @@
 #include <mlibc-config.h>
 #include <mlibc/all-sysdeps.hpp>
 
+static constexpr int kFdBitsPerMask = CHAR_BIT * sizeof(fd_mask);
+
 void __FD_CLR(int fd, fd_set *set) {
 	__ensure(fd < FD_SETSIZE);
-	set->fds_bits[fd / 8] &= ~(1 << (fd % 8));
+	set->fds_bits[fd / kFdBitsPerMask] &= ~(static_cast<fd_mask>(1) << (fd % kFdBitsPerMask));
 }
 int __FD_ISSET(int fd, fd_set *set) {
 	__ensure(fd < FD_SETSIZE);
-	return set->fds_bits[fd / 8] & (1 << (fd % 8));
+	return set->fds_bits[fd / kFdBitsPerMask] & (static_cast<fd_mask>(1) << (fd % kFdBitsPerMask));
 }
 void __FD_SET(int fd, fd_set *set) {
 	__ensure(fd < FD_SETSIZE);
-	set->fds_bits[fd / 8] |= 1 << (fd % 8);
+	set->fds_bits[fd / kFdBitsPerMask] |= static_cast<fd_mask>(1) << (fd % kFdBitsPerMask);
 }
 void __FD_ZERO(fd_set *set) {
-	memset(set->fds_bits, 0, sizeof(fd_set));
+	memset(set->fds_bits, 0, sizeof(set->fds_bits));
 }
 
 int select(int num_fds, fd_set *__restrict read_set, fd_set *__restrict write_set,

@@ -2067,6 +2067,9 @@ void Loader::_processRelocations(Relocation &rel) {
 		__ensure(p);
 		rel.relocate(p->symbol()->st_value + rel.addend_rel() - TLS_DTV_OFFSET);
 	} break;
+	#if defined(__i386__)
+	case R_386_TLS_TPOFF32:
+	#endif
 	case R_TLS_TPREL: {
 		uintptr_t off = rel.addend_rel();
 		ssize_t tls_offset = 0;

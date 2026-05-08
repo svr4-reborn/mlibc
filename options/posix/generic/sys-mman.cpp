@@ -110,7 +110,11 @@ int shm_open(const char *name, int flags, mode_t mode) {
 	if(!(name = shm_mapname(name, buf)))
 		return -1;
 	pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cs);
-	int fd = open(name, flags | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK, mode);
+	int open_flags = flags | O_CLOEXEC | O_NONBLOCK;
+#ifdef O_NOFOLLOW
+	open_flags |= O_NOFOLLOW;
+#endif
+	int fd = open(name, open_flags, mode);
 	pthread_setcancelstate(cs, nullptr);
 	return fd;
 }

@@ -149,16 +149,24 @@ int sig2str(int signum, char *str) {
 	if (signum <= 0 || signum >= NSIG)
 		return -1;
 
+	#ifdef SIGRTMIN
+	#ifdef SIGRTMAX
 	if (signum > SIGRTMIN && signum < SIGRTMAX) {
 		snprintf(str, SIG2STR_MAX, "RTMIN+%d", signum - SIGRTMIN);
 		return 0;
 	}
+	#endif
+	#endif
 
 #define CASE_FOR(x) case SIG##x: name = #x; break;
 
 	switch (signum) {
+	#ifdef SIGRTMIN
 		CASE_FOR(RTMIN)
+	#endif
+	#ifdef SIGRTMAX
 		CASE_FOR(RTMAX)
+	#endif
 
 		CASE_FOR(HUP)
 		CASE_FOR(INT)
@@ -193,7 +201,9 @@ int sig2str(int signum, char *str) {
 		CASE_FOR(POLL)
 		CASE_FOR(PWR)
 		CASE_FOR(SYS)
+	#ifdef SIGCANCEL
 		CASE_FOR(CANCEL)
+	#endif
 #ifdef SIGTIMER
 		CASE_FOR(TIMER)
 #endif
@@ -212,8 +222,12 @@ int sig2str(int signum, char *str) {
 int str2sig(const char *__restrict str, int *__restrict pnum) {
 #define CASE_FOR(x) if (!strcmp(str, #x)) { *pnum = SIG##x; return 0; }
 
+	#ifdef SIGRTMIN
 	CASE_FOR(RTMIN)
+	#endif
+	#ifdef SIGRTMAX
 	CASE_FOR(RTMAX)
+	#endif
 
 	CASE_FOR(HUP)
 	CASE_FOR(INT)
@@ -248,13 +262,17 @@ int str2sig(const char *__restrict str, int *__restrict pnum) {
 	CASE_FOR(POLL)
 	CASE_FOR(PWR)
 	CASE_FOR(SYS)
+	#ifdef SIGCANCEL
 	CASE_FOR(CANCEL)
+	#endif
 #ifdef SIGTIMER
 	CASE_FOR(TIMER)
 #endif
 
 #undef CASE_FOR
 
+	#ifdef SIGRTMIN
+	#ifdef SIGRTMAX
 	if (!strncmp(str, "RTMIN+", 6)) {
 		char *endptr = nullptr;
 		errno = 0;
@@ -275,7 +293,10 @@ int str2sig(const char *__restrict str, int *__restrict pnum) {
 
 		*pnum = SIGRTMAX - offset;
 		return 0;
-	} else if(!strncmp(str, "SIG#", 4)) {
+	} else
+	#endif
+	#endif
+	if(!strncmp(str, "SIG#", 4)) {
 		char *endptr = nullptr;
 		errno = 0;
 		auto val = strtol(str + 4, &endptr, 10);

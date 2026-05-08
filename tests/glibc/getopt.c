@@ -274,11 +274,7 @@ void test8() {
 		"jkl"
 	};
 
-	#ifdef __GLIBC__
-		optind = 0;
-	#else
-		optreset = 1;
-	#endif
+	optind = 0;
 	optopt = 0;
 	int c = getopt_long_only(test_argc, test_argv, shortopts, longopts, NULL);
 	dump(c);

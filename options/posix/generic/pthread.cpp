@@ -423,6 +423,7 @@ int pthread_getschedparam(pthread_t thread, int *policy, struct sched_param *par
 //pthread cancel functions
 
 namespace {
+	#ifdef SIGCANCEL
 
 	void sigcancel_handler(int signal, siginfo_t *info, void *ucontext) {
 		ucontext_t *uctx = static_cast<ucontext_t*>(ucontext);
@@ -478,6 +479,7 @@ namespace {
 			old_value = current_value;
 		}
 	}
+	#endif
 } // namespace
 
 namespace mlibc {
@@ -485,6 +487,7 @@ namespace {
 
 struct PthreadSignalInstaller {
 	PthreadSignalInstaller() {
+		#ifdef SIGCANCEL
 		struct sigaction sa{};
 		sa.sa_sigaction = sigcancel_handler;
 		sa.sa_flags = SA_SIGINFO;
@@ -495,6 +498,7 @@ struct PthreadSignalInstaller {
 		if(e == ENOSYS)
 			return;
 		__ensure(!e);
+		#endif
 	}
 };
 
@@ -566,12 +570,14 @@ int pthread_setcancelstate(int state, int *oldstate) {
 			if (mlibc::tcb_async_cancelled(new_value))
 				__mlibc_do_cancel();
 
+			#ifdef SIGCANCEL
 			sigset_t set = {};
 			sigaddset(&set, SIGCANCEL);
 			if (mlibc::tcb_cancel_enabled(new_value))
 				sigprocmask(SIG_UNBLOCK, &set, nullptr);
 			else
 				sigprocmask(SIG_BLOCK, &set, nullptr);
+			#endif
 			break;
 		}
 
@@ -615,6 +621,7 @@ int pthread_cancel(pthread_t thread) {
 					return 0;
 				}
 
+				#ifdef SIGCANCEL
 				pid_t pid = getpid();
 
 				int res = mlibc::sysdep_or_panic<Tgkill>(pid, tcb->tid, SIGCANCEL);
@@ -628,6 +635,7 @@ int pthread_cancel(pthread_t thread) {
 				//              exit. Perhaps the TCB should be refcounted.
 				if (!(res == ESRCH && (current_value & tcbExitingBit)))
 					return res;
+				#endif
 			}
 
 			break;

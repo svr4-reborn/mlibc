@@ -103,8 +103,10 @@ int lookup_name_dns(struct lookup_result &buf, const char *name,
 	request += char(0);
 	// set question type to fetch A or AAAA records
 	uint16_t qtype = RECORD_A;
+	#ifdef AF_INET6
 	if (family == AF_INET6)
 		qtype = RECORD_AAAA;
+	#endif
 
 	request += qtype >> 8;
 	request += qtype & 0xFF;
@@ -203,6 +205,7 @@ int lookup_name_dns(struct lookup_result &buf, const char *name,
 					buffer.name = std::move(dns_name);
 					buf.buf.push(std::move(buffer));
 					break;
+				#ifdef AF_INET6
 				case RECORD_AAAA:
 					if (family != AF_UNSPEC && family != AF_INET6)
 						continue;
@@ -213,6 +216,7 @@ int lookup_name_dns(struct lookup_result &buf, const char *name,
 					buffer.name = std::move(dns_name);
 					buf.buf.push(std::move(buffer));
 					break;
+				#endif
 				case RECORD_CNAME:
 					canon_name = read_dns_name(response, it);
 					buf.aliases.push(std::move(dns_name));
@@ -236,6 +240,9 @@ int lookup_name_dns(struct lookup_result &buf, const char *name,
 }
 
 int lookup_addr_dns(frg::span<char> name, frg::array<uint8_t, 16> &addr, int family) {
+	if(family != AF_INET)
+		return -EAI_FAMILY;
+
 	frg::string<MemoryAllocator> request{getAllocator()};
 
 	int num_q = 1;
@@ -427,8 +434,10 @@ int lookup_name_hosts(struct lookup_result &buf, const char *name,
 
 		if ((family == AF_UNSPEC || family == AF_INET) && inet_pton(AF_INET, line, buffer.addr)) {
 			buffer.family = AF_INET;
+		#ifdef AF_INET6
 		} else if((family == AF_UNSPEC || family == AF_INET6) && inet_pton(AF_INET6, line, buffer.addr)) {
 			buffer.family = AF_INET6;
+		#endif
 		} else {
 			continue; // not a valid address
 		}
@@ -513,8 +522,16 @@ int lookup_addr_hosts(frg::span<char> name, frg::array<uint8_t, 16> &addr, int f
 }
 
 int lookup_name_null(struct lookup_result &buf, int flags, int family) {
+	#ifndef AF_INET6
+	(void)family;
+	#endif
+
 	if (flags & AI_PASSIVE) {
+		#ifdef AF_INET6
 		if (family != AF_INET6) {
+		#else
+		if (true) {
+		#endif
 			struct dns_addr_buf addr_buf;
 			addr_buf.family = AF_INET;
 
@@ -523,6 +540,7 @@ int lookup_name_null(struct lookup_result &buf, int flags, int family) {
 
 			buf.buf.push_back(addr_buf);
 		}
+		#ifdef AF_INET6
 		if (family != AF_INET) {
 			struct dns_addr_buf addr_buf;
 			addr_buf.family = AF_INET6;
@@ -532,8 +550,13 @@ int lookup_name_null(struct lookup_result &buf, int flags, int family) {
 
 			buf.buf.push_back(addr_buf);
 		}
+		#endif
 	} else {
+		#ifdef AF_INET6
 		if (family != AF_INET6) {
+		#else
+		if (true) {
+		#endif
 			struct dns_addr_buf addr_buf;
 			addr_buf.family = AF_INET;
 
@@ -542,6 +565,7 @@ int lookup_name_null(struct lookup_result &buf, int flags, int family) {
 
 			buf.buf.push_back(addr_buf);
 		}
+		#ifdef AF_INET6
 		if (family != AF_INET) {
 			struct dns_addr_buf addr_buf;
 			addr_buf.family = AF_INET6;
@@ -551,6 +575,7 @@ int lookup_name_null(struct lookup_result &buf, int flags, int family) {
 
 			buf.buf.push_back(addr_buf);
 		}
+		#endif
 	}
 	return buf.buf.size();
 }
@@ -571,6 +596,7 @@ int lookup_name_ip(struct lookup_result &buf, const char *name, int family) {
 		return 1;
 	}
 
+	#ifdef AF_INET6
 	if (family == AF_INET6) {
 		struct in6_addr addr{};
 		int res = inet_pton(AF_INET6, name, &addr);
@@ -585,6 +611,7 @@ int lookup_name_ip(struct lookup_result &buf, const char *name, int family) {
 		buf.buf.push_back(addr_buf);
 		return 1;
 	}
+	#endif
 
 	// If no family was specified we try ipv4 and then ipv6.
 	in_addr_t addr4 = 0;
@@ -599,6 +626,7 @@ int lookup_name_ip(struct lookup_result &buf, const char *name, int family) {
 		return 1;
 	}
 
+	#ifdef AF_INET6
 	struct in6_addr addr6{};
 	res = inet_pton(AF_INET6, name, &addr6);
 
@@ -611,6 +639,9 @@ int lookup_name_ip(struct lookup_result &buf, const char *name, int family) {
 
 	buf.buf.push_back(addr_buf);
 	return 1;
+	#else
+	return -EAI_NONAME;
+	#endif
 }
 
 } // namespace mlibc

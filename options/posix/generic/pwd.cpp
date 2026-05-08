@@ -284,7 +284,7 @@ int putpwent(const struct passwd *p, FILE *f) {
 	}
 
 	// Taken from musl.
-	return fprintf(f, "%s:%s:%u:%u:%s:%s:%s\n", p->pw_name, p->pw_passwd, p->pw_uid, p->pw_gid, p->pw_gecos, p->pw_dir, p->pw_shell) < 0 ? -1 : 0;
+	return fprintf(f, "%s:%s:%ld:%ld:%s:%s:%s\n", p->pw_name, p->pw_passwd, p->pw_uid, p->pw_gid, p->pw_gecos, p->pw_dir, p->pw_shell) < 0 ? -1 : 0;
 }
 
 struct passwd *fgetpwent(FILE *file) {

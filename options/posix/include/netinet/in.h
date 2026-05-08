@@ -15,16 +15,19 @@ extern "C" {
 
 #ifndef __MLIBC_ABI_ONLY
 
-extern const struct in6_addr in6addr_any;
-extern const struct in6_addr in6addr_loopback;
-
 uint32_t htonl(uint32_t __x);
 uint16_t htons(uint16_t __x);
 uint32_t ntohl(uint32_t __x);
 uint16_t ntohs(uint16_t __x);
 
+#ifdef AF_INET6
+extern const struct in6_addr in6addr_any;
+extern const struct in6_addr in6addr_loopback;
+#endif
+
 #endif /* !__MLIBC_ABI_ONLY */
 
+#ifdef AF_INET6
 #define IN6_IS_ADDR_UNSPECIFIED(a) ({ \
     uint32_t *_a = (uint32_t *)(((struct in6_addr *) a)->s6_addr); \
     !_a[0] && \
@@ -85,6 +88,7 @@ uint16_t ntohs(uint16_t __x);
     (IN6_IS_ADDR_MULTICAST(a) && \
     ((((const uint8_t *)(a))[1] & 0xf) == 0xe)); \
 })
+#endif
 
 #define IN_CLASSA(a) ((((in_addr_t)(a)) & 0x80000000) == 0)
 #define IN_CLASSA_NET 0xff000000
@@ -106,11 +110,6 @@ uint16_t ntohs(uint16_t __x);
 #define IN_BADCLASS(a) ((((in_addr_t)(a)) & 0xf0000000) == 0xf0000000)
 
 #define IN_LOOPBACKNET 127
-
-#if defined(_DEFAULT_SOURCE)
-#define MCAST_EXCLUDE 0
-#define MCAST_INCLUDE 1
-#endif /* defined(_DEFAULT_SOURCE) */
 
 #ifdef __cplusplus
 }

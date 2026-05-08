@@ -144,6 +144,10 @@ struct Tcb {
 	void *stackAddr;
 	size_t guardSize;
 
+#if defined(__i386__)
+	unsigned int tlsSelector;
+#endif
+
 	inline void invokeThreadFunc(void *entry, void *user_arg) {
 		if(returnValueType == TcbThreadReturnValue::Pointer) {
 			auto func = reinterpret_cast<void *(*)(void *)>(entry);
