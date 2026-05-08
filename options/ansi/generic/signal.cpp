@@ -8,15 +8,15 @@
 
 __sighandler signal(int sn, __sighandler handler) {
 	struct sigaction sa;
-	sa.sa_handler = handler;
+	sa.sa_handler = reinterpret_cast<void (*)()>(handler);
 	sa.sa_flags = 0;
 	sigemptyset(&sa.sa_mask);
 	struct sigaction old;
 	if(int e = mlibc::sysdep_or_enosys<Sigaction>(sn, &sa, &old)){
 		errno = e;
-		return SIG_ERR;
+		return reinterpret_cast<__sighandler>(SIG_ERR);
 	}
-	return old.sa_handler;
+	return reinterpret_cast<__sighandler>(old.sa_handler);
 }
 
 int raise(int sig) {

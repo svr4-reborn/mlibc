@@ -324,7 +324,7 @@ int putgrent(const struct group *g, FILE *f) {
 	// Taken from musl.
 	flockfile(f);
 
-	int r = fprintf(f, "%s:%s:%u:", g->gr_name, g->gr_passwd, g->gr_gid);
+	int r = fprintf(f, "%s:%s:%ld:", g->gr_name, g->gr_passwd, g->gr_gid);
 	if(r < 0)
 		goto leave;
 

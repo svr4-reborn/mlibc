@@ -490,6 +490,8 @@ struct Sysconf {};
 struct Semget {};
 // int sys_semctl(int semid, int semnum, int cmd, void *semun, int *ret);
 struct Semctl {};
+// int sys_semop(int semid, struct sembuf *sops, size_t nsops);
+struct Semop {};
 // int sys_getaffinity(pid_t pid, size_t cpusetsize, cpu_set_t *mask);
 struct GetAffinity {};
 // int sys_getthreadaffinity(pid_t tid, size_t cpusetsize, cpu_set_t *mask);

@@ -36,8 +36,9 @@ void closelog(void) {
 }
 
 static void __openlog() {
-	log_fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+	log_fd = socket(AF_UNIX, SOCK_DGRAM, 0);
 	if(log_fd >= 0) {
+		fcntl(log_fd, F_SETFD, FD_CLOEXEC);
 		int ret = connect(log_fd, (const sockaddr *)&log_addr, sizeof log_addr);
 		if(ret) {
 			mlibc::infoLogger() << "\e[31mmlibc: syslog: connect returned an error, falling back to infoLogger\e[39m" << frg::endlog;

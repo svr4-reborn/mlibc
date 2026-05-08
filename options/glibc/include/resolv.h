@@ -58,7 +58,11 @@ typedef struct __res_state {
 			int nssocks[MAXNS];
 			uint16_t nscount6;
 			uint16_t nsinit;
+			#ifdef AF_INET6
 			struct sockaddr_in6	*nsaddrs[MAXNS];
+			#else
+			void *nsaddrs[MAXNS];
+			#endif
 			unsigned int _initstamp[2];
 		} _ext;
 	} _u;

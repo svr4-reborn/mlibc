@@ -242,6 +242,7 @@ SYSDEP_FUNC(ThreadGetname, void *tcb, char *name, size_t size);
 SYSDEP_FUNC(Sysconf, int num, long *ret);
 SYSDEP_FUNC(Semget, key_t key, int n, int fl, int *id);
 SYSDEP_FUNC(Semctl, int semid, int semnum, int cmd, void *semun, int *ret);
+SYSDEP_FUNC(Semop, int semid, struct sembuf *sops, size_t nsops);
 SYSDEP_FUNC(GetAffinity, pid_t pid, size_t cpusetsize, cpu_set_t *mask);
 SYSDEP_FUNC(GetThreadaffinity, pid_t tid, size_t cpusetsize, cpu_set_t *mask);
 SYSDEP_FUNC(SetAffinity, pid_t pid, size_t cpusetsize, const cpu_set_t *mask);

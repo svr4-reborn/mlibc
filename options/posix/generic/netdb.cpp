@@ -236,7 +236,11 @@ int getaddrinfo(const char *__restrict node, const char *__restrict service,
 		if (hints->ai_flags & AI_CANONNAME && !node)
 			return EAI_BADFLAGS;
 
-		if (family != AF_INET && family != AF_INET6 && family != AF_UNSPEC)
+		if (family != AF_INET
+			#ifdef AF_INET6
+			&& family != AF_INET6
+			#endif
+			&& family != AF_UNSPEC)
 			return EAI_FAMILY;
 	}
 
@@ -253,7 +257,11 @@ int getaddrinfo(const char *__restrict node, const char *__restrict service,
 			if (!ipv4 && !ipv6)
 				return EAI_NONAME;
 			else if (ipv4 != ipv6)
+				#ifdef AF_INET6
 				family = ipv4 ? AF_INET : AF_INET6;
+				#else
+				family = AF_INET;
+				#endif
 		} else {
 			mlibc::infoLogger() << "mlibc: sys_inet_configured() not implemented, cannot handle getaddrinfo with AI_ADDRCONFIG" << frg::endlog;
 			errno = ENOSYS;
@@ -321,12 +329,14 @@ int getaddrinfo(const char *__restrict node, const char *__restrict service,
 					out[i].sa.sin.sin_family = AF_INET;
 					memcpy(&out[i].sa.sin.sin_addr, addr_buf.buf[i].addr, 4);
 					break;
+					#ifdef AF_INET6
 				case AF_INET6:
 					out[i].ai.ai_addrlen = sizeof(struct sockaddr_in6);
 					out[i].sa.sin6.sin6_port = htons(serv_buf[j].port);
 					out[i].sa.sin6.sin6_family = AF_INET6;
 					memcpy(&out[i].sa.sin6.sin6_addr, addr_buf.buf[i].addr, 16);
 					break;
+					#endif
 			}
 		}
 	}
@@ -360,6 +370,7 @@ int getnameinfo(const struct sockaddr *__restrict addr, socklen_t addr_len,
 			port = sockaddr->sin_port;
 			break;
 		}
+			#ifdef AF_INET6
 		case AF_INET6: {
 			mlibc::infoLogger() << "getnameinfo(): ipv6 is not fully supported in this function" << frg::endlog;
 			if (addr_len < sizeof(struct sockaddr_in6))
@@ -369,6 +380,7 @@ int getnameinfo(const struct sockaddr *__restrict addr, socklen_t addr_len,
 			port = sockaddr->sin6_port;
 			break;
 		}
+			#endif
 		default:
 			return EAI_FAMILY;
 	}
@@ -485,13 +497,16 @@ struct hostent *gethostbyname(const char *name) {
 
 	// just pick the first family as the one for all addresses...??
 	h.h_addrtype = buf.buf[0].family;
-	if (h.h_addrtype != AF_INET && h.h_addrtype != AF_INET6) {
+	if (h.h_addrtype != AF_INET
+		#ifdef AF_INET6
+		&& h.h_addrtype != AF_INET6
+		#endif
+	) {
 		// this is not allowed per spec
 		h_errno = NO_DATA;
 		return nullptr;
 	}
 
-	// can only be AF_INET or AF_INET6
 	h.h_length = h.h_addrtype == AF_INET ? 4 : 16;
 	h.h_addr_list = reinterpret_cast<char**>(malloc((ret + 1) * sizeof(char*)));
 	int addr_pos = 0;

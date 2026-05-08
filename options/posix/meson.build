@@ -102,6 +102,7 @@ if not no_headers
 		'include/spawn.h',
 		'include/strings.h',
 		'include/syslog.h',
+		'include/stropts.h',
 		'include/termios.h',
 		'include/unistd.h',
 		'include/utime.h',

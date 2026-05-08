@@ -1,0 +1,1 @@
+// Intentionally empty scaffold file to match the Linux sysdeps layout.

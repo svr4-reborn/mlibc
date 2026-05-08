@@ -10,8 +10,10 @@
 #include <mlibc/bitutil.hpp>
 #include <mlibc/debug.hpp>
 
+#ifdef AF_INET6
 const struct in6_addr in6addr_any = IN6ADDR_ANY_INIT;
 const struct in6_addr in6addr_loopback = IN6ADDR_LOOPBACK_INIT;
+#endif
 
 uint32_t htonl(uint32_t x) {
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
@@ -160,6 +162,7 @@ const char *inet_ntop(int af, const void *__restrict src, char *__restrict dst,
 			}
 			return dst;
 		}
+		#ifdef AF_INET6
 		case AF_INET6: {
 			auto source = reinterpret_cast<const struct in6_addr*>(src);
 
@@ -236,6 +239,7 @@ const char *inet_ntop(int af, const void *__restrict src, char *__restrict dst,
 
 			return dst;
 		}
+		#endif
 		default:
 			errno = EAFNOSUPPORT;
 			return nullptr;
@@ -266,6 +270,7 @@ int inet_pton(int af, const char *__restrict src, void *__restrict dst) {
 			addr->s_addr = htonl(ip);
 			break;
 		}
+		#ifdef AF_INET6
 		case AF_INET6: {
 			size_t i = 0;
 			uint16_t array[8] = {0, 0, 0, 0, 0, 0, 0, 0};
@@ -385,6 +390,7 @@ int inet_pton(int af, const char *__restrict src, void *__restrict dst) {
 
 			break;
 		}
+		#endif
 		default:
 			errno = EAFNOSUPPORT;
 			return -1;

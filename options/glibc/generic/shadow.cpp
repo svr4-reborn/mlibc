@@ -131,7 +131,11 @@ int getspnam_r(const char *name, struct spwd *sp, char *buf, size_t size, struct
 		return errno = EINVAL;
 	}
 
-	fd = open(path, O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC);
+	int open_flags = O_RDONLY | O_NONBLOCK | O_CLOEXEC;
+#ifdef O_NOFOLLOW
+	open_flags |= O_NOFOLLOW;
+#endif
+	fd = open(path, open_flags);
 	if(fd >= 0) {
 		struct stat st = {};
 		errno = EINVAL;

@@ -15,10 +15,16 @@ endif
 
 fs = import('fs')
 
+normalized_cpu_family = host_machine.cpu_family()
+# Match ix86
+if normalized_cpu_family.startswith('i') and normalized_cpu_family.endswith('86')
+	normalized_cpu_family = 'x86'
+endif
+
 rtld_include_dirs = [
 	include_directories('options/internal/include'),
-	include_directories('options/internal' / host_machine.cpu_family() + '-include'),
-	include_directories('options/rtld' / host_machine.cpu_family()),
+	include_directories('options/internal' / normalized_cpu_family + '-include'),
+	include_directories('options/rtld' / normalized_cpu_family),
 	include_directories('options/rtld/include'),
 ]
 libc_include_dirs = [
@@ -26,8 +32,8 @@ libc_include_dirs = [
 	include_directories('options/elf/include'),
 	include_directories('options/lsb/include'),
 	include_directories('options/rtld/include'),
-	include_directories('options/rtld' / host_machine.cpu_family()),
-	include_directories('options/internal' / host_machine.cpu_family() + '-include')
+	include_directories('options/rtld' / normalized_cpu_family),
+	include_directories('options/internal' / normalized_cpu_family + '-include')
 ]
 
 rtld_sources = [ ]
@@ -47,7 +53,7 @@ build_tests_cross_libc = get_option('build_tests_cross_libc')
 cross_libc_ld_prefix = get_option('cross_libc_ld_prefix')
 
 # Disable cross-libc tests if no multilib is given, or build == host
-if cross_libc_ld_prefix == '' or build_machine.cpu_family() == host_machine.cpu_family()
+if cross_libc_ld_prefix == '' or build_machine.cpu_family() == normalized_cpu_family
 	build_tests_cross_libc = false
 endif
 
@@ -70,6 +76,7 @@ if not headers_only
 			target_triple.to_lower().contains('mlibc'))
 
 	freestnd_c_hdrs_dep = dependency(
+		# Actually uses the correct suffix, not x86, for i686 and co
 		'freestnd-c-hdrs-' + host_machine.cpu_family(),
 		required: use_freestnd_hdrs,
 		fallback: ['freestnd-c-hdrs', 'freestnd_c_hdrs_dep'],
@@ -78,6 +85,7 @@ if not headers_only
 	rtld_deps += freestnd_c_hdrs_dep
 
 	freestnd_cxx_hdrs_dep = dependency(
+		# Actually uses the correct suffix, not x86, for i686 and co
 		'freestnd-cxx-hdrs-' + host_machine.cpu_family(),
 		required: use_freestnd_hdrs,
 		fallback: ['freestnd-cxx-hdrs', 'freestnd_cxx_hdrs_dep'],
@@ -204,7 +212,7 @@ if default_library_paths.length() == 0
 		'm68k': 32,
 		'loongarch64': 64,
 	}
-	if target_word_size.get(target_machine.cpu_family()) == 64
+	if target_word_size.get(normalized_cpu_family) == 64
 		default_library_paths = ['/lib', '/lib64', '/usr/lib', '/usr/lib64']
 	else
 		default_library_paths = ['/lib', '/usr/lib']
@@ -290,6 +298,14 @@ elif host_machine.system() == 'zinnia'
 	internal_conf.set10('MLIBC_MMAP_ALLOCATE_DSO', true)
 	internal_conf.set10('MLIBC_MAP_FILE_WINDOWS', true)
 	subdir('sysdeps/zinnia')
+elif host_machine.system() == 'svr4'
+	provides_bits_syscall_h = true
+	rtld_include_dirs += include_directories('sysdeps/svr4/include')
+	libc_include_dirs += include_directories('sysdeps/svr4/include')
+	internal_conf.set10('MLIBC_MAP_DSO_SEGMENTS', true)
+	internal_conf.set10('MLIBC_MMAP_ALLOCATE_DSO', true)
+	internal_conf.set10('MLIBC_MAP_FILE_WINDOWS', true)
+	subdir('sysdeps/svr4')
 # ANCHOR: demo-sysdeps
 elif host_machine.system() == 'demo'
 	subdir('sysdeps/demo')
@@ -457,11 +473,11 @@ internal_sources = [
 	'options/internal/gcc/stack_protector.cpp',
 	'options/internal/gcc/guard-abi.cpp',
 	'options/internal/gcc-extra/cxxabi.cpp',
-	'options/internal' / host_machine.cpu_family() / 'setjmp.S',
-	'options/internal' / host_machine.cpu_family() / 'fenv.S',
+	'options/internal' / normalized_cpu_family / 'setjmp.S',
+	'options/internal' / normalized_cpu_family / 'fenv.S',
 ]
 
-if host_machine.cpu_family() == 'riscv64'
+if normalized_cpu_family == 'riscv64'
 	internal_sources += [
 		'options/internal/riscv64/hwprobe.cpp',
 	]
@@ -472,7 +488,7 @@ if not no_headers
 		'options/internal/include/stdint.h'
 	)
 
-	if host_machine.cpu_family() == 'riscv64'
+	if normalized_cpu_family == 'riscv64'
 		install_headers(
 			'options/internal/riscv64-include/sys/hwprobe.h',
 			subdir: 'sys'
@@ -523,10 +539,10 @@ rtld_sources += [
 	'options/internal/generic/ubsan.cpp',
 	'options/rtld/generic/main.cpp',
 	'options/rtld/generic/linker.cpp',
-	'options/rtld' / host_machine.cpu_family() / 'runtime.S'
+	'options/rtld' / normalized_cpu_family / 'runtime.S'
 ]
 
-rtld_dso_sources += ['options/rtld' / host_machine.cpu_family() / 'entry.S']
+rtld_dso_sources += ['options/rtld' / normalized_cpu_family / 'entry.S']
 
 subdir('options/elf')
 subdir('options/ansi')

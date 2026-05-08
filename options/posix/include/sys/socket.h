@@ -5,6 +5,7 @@
 #include <mlibc-config.h>
 
 #include <bits/size_t.h>
+#include <abi-bits/sa_family_t.h>
 #include <abi-bits/socklen_t.h>
 #include <bits/ssize_t.h>
 #include <bits/posix/iovec.h>
@@ -27,6 +28,7 @@ struct sockaddr {
 	char sa_data[14];
 };
 
+#if __MLIBC_ABI_HAS_CMSG
 /* Control message format: */
 /* The offsets marked with ^ are aligned to alignof(size_t). */
 /* */
@@ -66,13 +68,14 @@ struct sockaddr {
 		(ssize_t)(sizeof(struct cmsghdr) + __CMSG_ALIGN((c)->cmsg_len)) \
 			>= __MLIBC_MHDR_LIMIT(m) - (char *)(c) \
 	? (struct cmsghdr *)0 : (struct cmsghdr *)__MLIBC_CMSG_NEXT(c))
+#endif /* __MLIBC_ABI_HAS_CMSG */
 
 struct linger{
 	int l_onoff;
 	int l_linger;
 };
 
-#if defined(_GNU_SOURCE)
+#if defined(_GNU_SOURCE) && __MLIBC_ABI_HAS_MMSGHDR
 struct ucred {
 	pid_t pid;
 	uid_t uid;
@@ -104,7 +107,7 @@ int sockatmark(int __sockfd);
 int socket(int __domain, int __type, int __protocol);
 int socketpair(int __domain, int __type, int __protocol, int __sv[2]);
 
-#if defined(_GNU_SOURCE)
+#if defined(_GNU_SOURCE) && __MLIBC_ABI_HAS_MMSGHDR
 int recvmmsg(int __sockfd, struct mmsghdr *__msgvec, unsigned int __vlen, int __flags, struct timespec *__timeout);
 int sendmmsg(int __sockfd, struct mmsghdr *__msgvec, unsigned int __vlen, int __flags);
 #endif

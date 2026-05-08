@@ -20,9 +20,12 @@ int semget(key_t key, int n, int fl) {
 	return id;
 }
 
-int semop(int, struct sembuf *, size_t) {
-	__ensure(!"Not implemented");
-	__builtin_unreachable();
+int semop(int semid, struct sembuf *sops, size_t nsops) {
+	if(int e = mlibc::sysdep_or_enosys<Semop>(semid, sops, nsops); e) {
+		errno = e;
+		return -1;
+	}
+	return 0;
 }
 
 union semun {

@@ -127,10 +127,12 @@ ssize_t recvmsg(int fd, struct msghdr *hdr, int flags) {
 	return length;
 }
 
+#if defined(_GNU_SOURCE) && __MLIBC_ABI_HAS_MMSGHDR
 int recvmmsg(int, struct mmsghdr *, unsigned int, int, struct timespec *) {
 	__ensure(!"Not implemented");
 	__builtin_unreachable();
 }
+#endif
 
 ssize_t send(int fd, const void *buffer, size_t size, int flags) {
 	return sendto(fd, buffer, size, flags, nullptr, 0);
@@ -174,10 +176,12 @@ ssize_t sendmsg(int fd, const struct msghdr *hdr, int flags) {
 	return length;
 }
 
+#if defined(_GNU_SOURCE) && __MLIBC_ABI_HAS_MMSGHDR
 int sendmmsg(int, struct mmsghdr *, unsigned int, int) {
 	__ensure(!"Not implemented");
 	__builtin_unreachable();
 }
+#endif
 
 int setsockopt(int fd, int layer, int number,
 		const void *buffer, socklen_t size) {
