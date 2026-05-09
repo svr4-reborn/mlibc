@@ -15,10 +15,10 @@ extern "C" {
 
 typedef void (*__sighandler)(int);
 
-#define SIG_DFL ((void (*)())0)
-#define SIG_ERR ((void (*)())-1)
-#define SIG_IGN ((void (*)())1)
-#define SIG_HOLD ((void (*)())2)
+#define SIG_DFL ((__sighandler)(void *)(0))
+#define SIG_ERR ((__sighandler)(void *)(-1))
+#define SIG_IGN ((__sighandler)(void *)(1))
+#define SIG_HOLD ((__sighandler)(void *)(2))
 
 #define SIGHUP 1
 #define SIGINT 2
@@ -68,7 +68,7 @@ typedef void (*__sighandler)(int);
 
 struct sigaction {
 	int sa_flags;
-	void (*sa_handler)();
+	__sighandler sa_handler;
 	sigset_t sa_mask;
 	int sa_resv[2];
 };
