@@ -20,6 +20,9 @@ __mlibc_do_asm_cp_syscall:
 	mov %edx, 28(%esp)
 __mlibc_syscall_begin:
 	lcall $0x7, $0
+	jnc 1f
+	negl %eax
+1:
 __mlibc_syscall_end:
 	ret
 
