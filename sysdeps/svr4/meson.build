@@ -105,7 +105,7 @@ if not no_headers
 endif
 
 if not headers_only
-	custom_target('crt1',
+	crt = custom_target('crt1',
 		build_by_default: true,
 		command: c_compiler.cmd_array() + ['-c', '-o', '@OUTPUT@', '@INPUT@'],
 		input: normalized_cpu_family / 'crt-src/crt1.S',
@@ -114,7 +114,7 @@ if not headers_only
 		install_dir: get_option('libdir')
 	)
 
-	custom_target('Scrt1',
+	crt_pie = custom_target('Scrt1',
 		build_by_default: true,
 		command: c_compiler.cmd_array() + ['-fPIE', '-c', '-o', '@OUTPUT@', '@INPUT@'],
 		input: normalized_cpu_family / 'crt-src/Scrt1.S',

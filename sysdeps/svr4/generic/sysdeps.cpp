@@ -14,9 +14,11 @@
 #include <abi-bits/termios.h>
 #include <abi-bits/vm-flags.h>
 #include <bits/syscall.h>
+#include <netinet/in.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
+#include <sys/time.h>
 #include <sys/wait.h>
 #include <mlibc/all-sysdeps.hpp>
 #include <mlibc/debug.hpp>
@@ -24,6 +26,26 @@
 
 extern "C" [[gnu::visibility("hidden")]] void __mlibc_signal_restore(void);
 extern "C" [[gnu::visibility("hidden")]] void __mlibc_signal_restore_rt(void);
+
+static int check_socket_family(int family) {
+	if(family == AF_INET6)
+		return EAFNOSUPPORT;
+	return 0;
+}
+
+static int check_socket_address(const struct sockaddr *addr_ptr, socklen_t addr_length) {
+	if(!addr_ptr || addr_length < sizeof(sa_family_t))
+		return 0;
+	if(addr_ptr->sa_family == AF_INET6)
+		return EAFNOSUPPORT;
+	return 0;
+}
+
+static int check_socket_option_layer(int layer) {
+	if(layer == SOL_IPV6 || layer == IPPROTO_IPV6)
+		return ENOPROTOOPT;
+	return 0;
+}
 
 /// SVR4 syscalls are a bit weird, compared to more modern kernels.
 /// Not only are they done via far calls and call gates, they return whether
@@ -177,8 +199,6 @@ constexpr bool syscall_should_restart(long number) {
 		case SYS_writev:
 		case SYS_open:
 		case SYS_ioctl:
-		case SYS_wait:
-		case SYS_waitsys:
 		case SYS_hrtsys:
 			return true;
 		default:
@@ -270,6 +290,27 @@ struct ssd {
 		unsigned long res;
 	};
 
+	struct svr4_ecb {
+		short eqd;
+		unsigned short flags;
+		long eid;
+		long evpri;
+	};
+
+	struct svr4_hrtcmd {
+		int cmd;
+		int clk;
+		svr4_hrtime interval;
+		svr4_hrtime tod;
+		int flags;
+		int error;
+		svr4_ecb ecb;
+	};
+
+	struct itimer_shadow_state {
+		struct timeval interval;
+	};
+
 	struct svr4_kernel_utsname {
 		char sysname[257];
 		char nodename[257];
@@ -284,11 +325,22 @@ constexpr unsigned int kDataAcc2 = 0xC;
 constexpr unsigned int kFirstTlsSelectorIndex = 7;
 constexpr unsigned int kMaxLdtIndex = 8192;
 constexpr int kHrtsysCntlOpcode = 0;
+constexpr int kHrtsysAlarmOpcode = 1;
 constexpr int kHrtGetResCommand = 0;
 constexpr int kHrtTofdCommand = 1;
 constexpr int kHrtStartItCommand = 2;
 constexpr int kHrtGetItCommand = 3;
+constexpr int kHrtBsdCommand = 12;
+constexpr int kHrtBsdPendCommand = 13;
+constexpr int kHrtRBsdCommand = 14;
+constexpr int kHrtBsdRepCommand = 15;
+constexpr int kHrtBsdCancelCommand = 16;
+constexpr int kHrtFlagDone = 0x0001;
+constexpr int kHrtFlagError = 0x0002;
 constexpr int kClockStd = 0x0001;
+constexpr int kClockUserVirt = 0x0002;
+constexpr int kClockProcVirt = 0x0004;
+constexpr long kMicrosecondsPerSecond = 1000000L;
 constexpr unsigned long kNanosecondsPerSecond = 1000000000UL;
 constexpr int kMsggetSubcode = 0;
 constexpr int kMsgctlSubcode = 1;
@@ -326,6 +378,10 @@ constexpr unsigned long kSiocAtmark = 0x40047307;
 constexpr int kSiHostnameCommand = 2;
 constexpr long kClockTicksPerSecond = 100;
 
+unsigned char global_itimer_lock;
+long global_itimer_owner;
+itimer_shadow_state global_itimer_state[3];
+
 template<size_t N>
 void copy_uts_field(char (&destination)[N], const char *source) {
 	size_t length = 0;
@@ -339,6 +395,153 @@ void copy_uts_field(char (&destination)[N], const char *source) {
 void timeval_from_clock_ticks(clock_t ticks, timeval *tv) {
 	tv->tv_sec = ticks / kClockTicksPerSecond;
 	tv->tv_usec = (ticks % kClockTicksPerSecond) * 1000000 / kClockTicksPerSecond;
+}
+
+void lock_itimer_state() {
+	while(__atomic_test_and_set(&global_itimer_lock, __ATOMIC_ACQUIRE))
+		__asm__ __volatile__("pause");
+}
+
+void unlock_itimer_state() {
+	__atomic_clear(&global_itimer_lock, __ATOMIC_RELEASE);
+}
+
+struct itimer_lock_guard {
+	itimer_lock_guard() {
+		lock_itimer_state();
+	}
+
+	~itimer_lock_guard() {
+		unlock_itimer_state();
+	}
+};
+
+int map_itimer_clock(int which, int *clock) {
+	switch(which) {
+		case ITIMER_REAL:
+			*clock = kClockStd;
+			return 0;
+		case ITIMER_VIRTUAL:
+			*clock = kClockUserVirt;
+			return 0;
+		case ITIMER_PROF:
+			*clock = kClockProcVirt;
+			return 0;
+		default:
+			return EINVAL;
+	}
+}
+
+int validate_timeval_value(const struct timeval &tv) {
+	if(tv.tv_sec < 0 || tv.tv_usec < 0 || tv.tv_usec >= kMicrosecondsPerSecond)
+		return EINVAL;
+	return 0;
+}
+
+int validate_itimerval_value(const struct itimerval &value) {
+	if(int e = validate_timeval_value(value.it_interval); e)
+		return e;
+	if(int e = validate_timeval_value(value.it_value); e)
+		return e;
+	return 0;
+}
+
+bool timeval_is_zero(const struct timeval &tv) {
+	return tv.tv_sec == 0 && tv.tv_usec == 0;
+}
+
+svr4_hrtime make_svr4_hrtime(const struct timeval &tv) {
+	return svr4_hrtime{
+		static_cast<unsigned long>(tv.tv_sec),
+		static_cast<long>(tv.tv_usec),
+		static_cast<unsigned long>(kMicrosecondsPerSecond)
+	};
+}
+
+int convert_svr4_hrtime(const svr4_hrtime &time, struct timeval *tv) {
+	if(time.res != static_cast<unsigned long>(kMicrosecondsPerSecond))
+		return EIO;
+	if(time.rem < 0 || time.rem >= kMicrosecondsPerSecond)
+		return EIO;
+	tv->tv_sec = static_cast<time_t>(time.secs);
+	tv->tv_usec = static_cast<suseconds_t>(time.rem);
+	return 0;
+}
+
+int run_hrt_alarm_command(svr4_hrtcmd *command) {
+	if(int e = syscall_call(SYS_hrtsys, kHrtsysAlarmOpcode, command, 1).error(); e)
+		return e;
+	if(command->flags & kHrtFlagError)
+		return command->error ? command->error : EIO;
+	if(command->flags & kHrtFlagDone)
+		return 0;
+	return EIO;
+}
+
+int sync_itimer_owner_locked() {
+	long pid;
+	if(int e = syscall_call(SYS_getpid).store(&pid); e)
+		return e;
+	if(global_itimer_owner == pid)
+		return 0;
+	memset(global_itimer_state, 0, sizeof(global_itimer_state));
+	global_itimer_owner = pid;
+	return 0;
+}
+
+int read_itimer_locked(int which, struct itimerval *curr_value) {
+	int clock;
+	if(int e = map_itimer_clock(which, &clock); e)
+		return e;
+
+	memset(curr_value, 0, sizeof(struct itimerval));
+	curr_value->it_interval = global_itimer_state[which].interval;
+
+	svr4_hrtcmd command{};
+	command.cmd = kHrtBsdPendCommand;
+	command.clk = clock;
+
+	if(int e = run_hrt_alarm_command(&command); e) {
+		if(e == EDOM)
+			return 0;
+		return e;
+	}
+
+	return convert_svr4_hrtime(command.interval, &curr_value->it_value);
+}
+
+int write_itimer_locked(int which, const struct itimerval *new_value) {
+	int clock;
+	if(int e = map_itimer_clock(which, &clock); e)
+		return e;
+
+	if(timeval_is_zero(new_value->it_value)) {
+		svr4_hrtcmd cancel{};
+		cancel.cmd = kHrtBsdCancelCommand;
+		cancel.clk = clock;
+		if(int e = run_hrt_alarm_command(&cancel); e)
+			return e;
+		global_itimer_state[which].interval = {};
+		return 0;
+	}
+
+	svr4_hrtcmd command{};
+	command.clk = clock;
+
+	if(timeval_is_zero(new_value->it_interval)) {
+		command.cmd = kHrtBsdCommand;
+		command.interval = make_svr4_hrtime(new_value->it_value);
+	} else {
+		command.cmd = kHrtBsdRepCommand;
+		command.interval = make_svr4_hrtime(new_value->it_interval);
+		command.tod = make_svr4_hrtime(new_value->it_value);
+	}
+
+	if(int e = run_hrt_alarm_command(&command); e)
+		return e;
+
+	global_itimer_state[which].interval = new_value->it_interval;
+	return 0;
 }
 
 int translate_hrtime_result(const svr4_hrtime &time, time_t *secs, long *nanos) {
@@ -700,17 +903,23 @@ int Sysdeps<GetHostname>::operator()(char *buffer, size_t bufsize) {
 }
 
 int Sysdeps<GetResuid>::operator()(uid_t *ruid, uid_t *euid, uid_t *suid) {
-	(void)ruid;
-	(void)euid;
-	(void)suid;
-	return ENOSYS;
+	uid_t dummy_ruid;
+	uid_t dummy_euid;
+	uid_t dummy_suid;
+	return syscall_call(SYS_getresuid,
+			ruid ? ruid : &dummy_ruid,
+			euid ? euid : &dummy_euid,
+			suid ? suid : &dummy_suid).error();
 }
 
 int Sysdeps<GetResgid>::operator()(gid_t *rgid, gid_t *egid, gid_t *sgid) {
-	(void)rgid;
-	(void)egid;
-	(void)sgid;
-	return ENOSYS;
+	gid_t dummy_rgid;
+	gid_t dummy_egid;
+	gid_t dummy_sgid;
+	return syscall_call(SYS_getresgid,
+			rgid ? rgid : &dummy_rgid,
+			egid ? egid : &dummy_egid,
+			sgid ? sgid : &dummy_sgid).error();
 }
 
 int Sysdeps<Chdir>::operator()(const char *path) {
@@ -772,6 +981,11 @@ int Sysdeps<Writev>::operator()(int fd, const struct iovec *iovs, int iovc, ssiz
 
 int Sysdeps<Open>::operator()(const char *path, int flags, mode_t mode, int *fd) {
 	int open_flags = flags & ~O_CLOEXEC;
+	if (open_flags & O_NOFOLLOW) {
+		mlibc::infoLogger() << "mlibc: O_NOFOLLOW is not supported on SVR4, ignoring" << frg::endlog;
+		open_flags &= ~O_NOFOLLOW;
+	}
+
 	auto opened = syscall_call(SYS_open, path, open_flags, mode);
 	long opened_fd;
 	if(int e = opened.store(&opened_fd); e)
@@ -846,25 +1060,17 @@ int Sysdeps<Dup2>::operator()(int fd, int flags, int newfd) {
 		return EINVAL;
 
 	if(fd == newfd) {
+		if(flags & O_CLOEXEC)
+			return EINVAL;
 		if(int e = syscall_call(SYS_fcntl, fd, F_GETFD, 0).error(); e)
 			return e;
 		return 0;
 	}
 
-	int close_error = syscall_call(SYS_close, newfd).error();
-	if(close_error && close_error != EBADF)
-		return close_error;
-
+	int request = (flags & O_CLOEXEC) ? F_DUP2FD_CLOEXEC : F_DUP2FD;
 	long duplicated_fd;
-	if(int e = syscall_call(SYS_fcntl, fd, F_DUPFD, newfd).store(&duplicated_fd); e)
+	if(int e = syscall_call(SYS_fcntl, fd, request, newfd).store(&duplicated_fd); e)
 		return e;
-
-	if(flags & O_CLOEXEC) {
-		if(int e = syscall_call(SYS_fcntl, duplicated_fd, F_SETFD, FD_CLOEXEC).error(); e) {
-			(void)syscall_call(SYS_close, duplicated_fd);
-			return e;
-		}
-	}
 
 	return 0;
 }
@@ -1191,6 +1397,8 @@ int Sysdeps<Fcntl>::operator()(int fd, int request, va_list args, int *result) {
 	case F_GETOWN:
 		break;
 	case F_DUPFD:
+	case F_DUP2FD:
+	case F_DUP2FD_CLOEXEC:
 	case F_SETFD:
 	case F_SETFL:
 	case F_SETOWN:
@@ -1399,6 +1607,11 @@ int Sysdeps<Poll>::operator()(struct pollfd *fds, nfds_t count, int timeout, int
 	return syscall_call(SYS_poll, fds, count, timeout).store(num_events);
 }
 
+int Sysdeps<Ppoll>::operator()(struct pollfd *fds, nfds_t count, const struct timespec *timeout,
+		const sigset_t *sigmask, int *num_events) {
+	return syscall_call(SYS_ppoll, fds, count, timeout, sigmask).store(num_events);
+}
+
 int Sysdeps<Pselect>::operator()(int num_fds, fd_set *read_set, fd_set *write_set,
 		fd_set *except_set, const struct timespec *timeout, const sigset_t *sigmask, int *num_events) {
 	if(num_fds < 0 || !num_events)
@@ -1406,17 +1619,9 @@ int Sysdeps<Pselect>::operator()(int num_fds, fd_set *read_set, fd_set *write_se
 	if(num_fds > FD_SETSIZE)
 		return EINVAL;
 
-	int timeout_ms = -1;
 	if(timeout) {
 		if(timeout->tv_sec < 0 || timeout->tv_nsec < 0 || timeout->tv_nsec >= 1000000000L)
 			return EINVAL;
-
-		long long timeout_ll = static_cast<long long>(timeout->tv_sec) * 1000;
-		timeout_ll += (timeout->tv_nsec + 999999) / 1000000;
-		if(timeout_ll > INT_MAX)
-			timeout_ms = INT_MAX;
-		else
-			timeout_ms = static_cast<int>(timeout_ll);
 	}
 
 	int active_fds = 0;
@@ -1456,27 +1661,9 @@ int Sysdeps<Pselect>::operator()(int num_fds, fd_set *read_set, fd_set *write_se
 	if(except_set)
 		local_fd_zero(except_set);
 
-	int mask_error = 0;
-	sigset_t old_mask;
-	// SVR4 exposes poll() and sigprocmask() separately but has no atomic
-	// pselect()-style syscall. This is a best-effort emulation of the Linux/POSIX
-	// interface rather than a fully atomic mask-swap-and-wait primitive.
-	if(sigmask)
-		mask_error = sysdep<Sigprocmask>(SIG_SETMASK, sigmask, &old_mask);
-	if(mask_error)
-		return mask_error;
-
 	int poll_events = 0;
-	int poll_error = sysdep<Poll>(poll_fds, active_fds, timeout_ms, &poll_events);
-
-	int restore_error = 0;
-	if(sigmask)
-		restore_error = sysdep<Sigprocmask>(SIG_SETMASK, &old_mask, nullptr);
-
-	if(poll_error)
-		return poll_error;
-	if(restore_error)
-		return restore_error;
+	if(int e = sysdep<Ppoll>(poll_fds, active_fds, timeout, sigmask, &poll_events); e)
+		return e;
 
 	for(int index = 0; index < active_fds; ++index) {
 		int fd = poll_fds[index].fd;
@@ -1551,6 +1738,32 @@ int Sysdeps<ClockGet>::operator()(int clock, time_t* secs, long* nanos) {
 		default:
 			return EINVAL;
 	}
+}
+
+int Sysdeps<GetItimer>::operator()(int which, struct itimerval *curr_value) {
+	if(!curr_value)
+		return EINVAL;
+
+	itimer_lock_guard guard;
+	if(int e = sync_itimer_owner_locked(); e)
+		return e;
+	return read_itimer_locked(which, curr_value);
+}
+
+int Sysdeps<SetItimer>::operator()(int which, const struct itimerval *new_value, struct itimerval *old_value) {
+	if(!new_value)
+		return EINVAL;
+	if(int e = validate_itimerval_value(*new_value); e)
+		return e;
+
+	itimer_lock_guard guard;
+	if(int e = sync_itimer_owner_locked(); e)
+		return e;
+	if(old_value) {
+		if(int e = read_itimer_locked(which, old_value); e)
+			return e;
+	}
+	return write_itimer_locked(which, new_value);
 }
 
 int Sysdeps<Stat>::operator()(fsfd_target target, int dirfd, const char *path, int flags,
@@ -1678,6 +1891,9 @@ int Sysdeps<Unlinkat>::operator()(int dirfd, const char *path, int flags) {
 }
 
 int Sysdeps<Socket>::operator()(int family, int type, int protocol, int *fd) {
+	if(int e = check_socket_family(family); e)
+		return e;
+
 	int flags = type & (SOCK_CLOEXEC | SOCK_NONBLOCK);
 	int kernel_type = type & ~(SOCK_CLOEXEC | SOCK_NONBLOCK);
 	int bootstrap_fd = open_socket_bootstrap();
@@ -1726,11 +1942,17 @@ int Sysdeps<Accept>::operator()(int fd, int *newfd, struct sockaddr *addr_ptr, s
 }
 
 int Sysdeps<Bind>::operator()(int fd, const struct sockaddr *addr_ptr, socklen_t addr_length) {
+	if(int e = check_socket_address(addr_ptr, addr_length); e)
+		return e;
+
 	socksysreq req = make_socksys_request(kSockBindSubcode, fd, addr_ptr, addr_length, 0, 0, 0);
 	return socksys_ioctl(fd, &req, nullptr);
 }
 
 int Sysdeps<Connect>::operator()(int fd, const struct sockaddr *addr_ptr, socklen_t addr_length) {
+	if(int e = check_socket_address(addr_ptr, addr_length); e)
+		return e;
+
 	socksysreq req = make_socksys_request(kSockConnectSubcode, fd, addr_ptr, addr_length, 0, 0, 0);
 	return socksys_ioctl(fd, &req, nullptr);
 }
@@ -1746,11 +1968,19 @@ int Sysdeps<Peername>::operator()(int fd, struct sockaddr *addr_ptr, socklen_t, 
 }
 
 int Sysdeps<GetSockopt>::operator()(int fd, int layer, int number, void *buffer, socklen_t *size) {
+	(void)number;
+	if(int e = check_socket_option_layer(layer); e)
+		return e;
+
 	socksysreq req = make_socksys_request(kSockGetsockoptSubcode, fd, layer, number, buffer, size, 0);
 	return socksys_ioctl(fd, &req, nullptr);
 }
 
 int Sysdeps<SetSockopt>::operator()(int fd, int layer, int number, const void *buffer, socklen_t size) {
+	(void)number;
+	if(int e = check_socket_option_layer(layer); e)
+		return e;
+
 	socksysreq req = make_socksys_request(kSockSetsockoptSubcode, fd, layer, number, buffer, size, 0);
 	return socksys_ioctl(fd, &req, nullptr);
 }
@@ -1770,6 +2000,9 @@ int Sysdeps<Recvfrom>::operator()(int fd, void *buffer, size_t size, int flags, 
 }
 
 int Sysdeps<Sendto>::operator()(int fd, const void *buffer, size_t size, int flags, const struct sockaddr *sock_addr, socklen_t addr_length, ssize_t *length) {
+	if(int e = check_socket_address(sock_addr, addr_length); e)
+		return e;
+
 	int subcode = sock_addr ? kSockSendtoSubcode : kSockSendSubcode;
 	socksysreq req = make_socksys_request(subcode, fd, buffer, size, flags, sock_addr, addr_length);
 	long ret;

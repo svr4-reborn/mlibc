@@ -123,5 +123,8 @@
 #define SYS_adjtime 138
 #define SYS_systeminfo 139
 #define SYS_seteuid 141
+#define SYS_getresuid 142
+#define SYS_getresgid 143
+#define SYS_ppoll 144
 
 #endif /* _SYS_SYSCALL_H */

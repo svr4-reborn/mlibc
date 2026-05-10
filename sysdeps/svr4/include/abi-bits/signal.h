@@ -15,6 +15,8 @@ extern "C" {
 
 typedef void (*__sighandler)(int);
 
+struct siginfo;
+
 #define SIG_DFL ((__sighandler)(void *)(0))
 #define SIG_ERR ((__sighandler)(void *)(-1))
 #define SIG_IGN ((__sighandler)(void *)(1))
@@ -68,12 +70,16 @@ typedef void (*__sighandler)(int);
 
 struct sigaction {
 	int sa_flags;
-	__sighandler sa_handler;
+	union {
+		__sighandler sa_handler;
+		void (*sa_sigaction)(int, struct siginfo *, void *);
+	} __sa_handler;
 	sigset_t sa_mask;
 	int sa_resv[2];
 };
 
-#define sa_sigaction sa_handler
+#define sa_handler __sa_handler.sa_handler
+#define sa_sigaction __sa_handler.sa_sigaction
 
 #define SA_ONSTACK 0x00000001
 #define SA_RESETHAND 0x00000002
@@ -120,6 +126,10 @@ typedef struct sigaltstack stack_t;
 #define SI_FROMUSER(sip) ((sip)->si_code <= 0)
 #define SI_FROMKERNEL(sip) ((sip)->si_code > 0)
 
+#define SI_ASYNCIO (-4)
+#define SI_MESGQ (-3)
+#define SI_TIMER (-2)
+#define SI_QUEUE (-1)
 #define SI_USER 0
 
 #define ILL_ILLOPC 1
@@ -171,6 +181,7 @@ typedef struct siginfo {
 			union {
 				struct {
 					uid_t _uid;
+					union sigval _value;
 				} _kill;
 				struct {
 					clock_t _utime;
@@ -194,6 +205,9 @@ typedef struct siginfo {
 #define si_stime _data._proc._pdata._cld._stime
 #define si_utime _data._proc._pdata._cld._utime
 #define si_uid _data._proc._pdata._kill._uid
+#define si_value _data._proc._pdata._kill._value
+#define si_ptr si_value.sival_ptr
+#define si_int si_value.sival_int
 #define si_addr _data._fault._addr
 #define si_fd _data._file._fd
 #define si_band _data._file._band

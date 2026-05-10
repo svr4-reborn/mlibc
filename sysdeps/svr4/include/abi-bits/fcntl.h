@@ -19,6 +19,7 @@
 #define O_EXCL 0x400
 #define O_NOCTTY 0x800
 #define O_CLOEXEC 0x2000000
+#define O_NOFOLLOW 0x4000000
 
 #define F_DUPFD  0
 #define F_GETFD  1
@@ -38,6 +39,8 @@
 #define F_RSETLKW 22
 #define F_GETOWN 23
 #define F_SETOWN 24
+#define F_DUP2FD 25
+#define F_DUP2FD_CLOEXEC 26
 
 #define F_CHSIZE 0x6000
 #define F_RDCHK 0x6001

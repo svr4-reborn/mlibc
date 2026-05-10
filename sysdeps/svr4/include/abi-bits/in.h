@@ -1,6 +1,7 @@
 #ifndef _ABIBITS_IN_H
 #define _ABIBITS_IN_H
 
+#include <abi-bits/socket.h>
 #include <bits/posix/in_addr_t.h>
 #include <bits/posix/in_port_t.h>
 #include <stdint.h>
@@ -39,6 +40,38 @@ struct sockaddr_in {
 	char sin_zero[8];
 };
 
+struct in6_addr {
+	union {
+		uint8_t __s6_addr[16];
+		uint16_t __s6_addr16[8];
+		uint32_t __s6_addr32[4];
+	} __in6_union;
+};
+
+#define s6_addr __in6_union.__s6_addr
+#define s6_addr16 __in6_union.__s6_addr16
+#define s6_addr32 __in6_union.__s6_addr32
+
+struct sockaddr_in6 {
+	short sin6_family;
+	in_port_t sin6_port;
+	uint32_t sin6_flowinfo;
+	struct in6_addr sin6_addr;
+	uint32_t sin6_scope_id;
+};
+
+struct ipv6_mreq {
+	struct in6_addr ipv6mr_multiaddr;
+	unsigned ipv6mr_interface;
+};
+
+#if defined(_GNU_SOURCE)
+struct in6_pktinfo {
+	struct in6_addr ipi6_addr;
+	uint32_t ipi6_ifindex;
+};
+#endif
+
 #ifdef __cplusplus
 }
 #endif
@@ -48,7 +81,11 @@ struct sockaddr_in {
 #define INADDR_NONE       ((in_addr_t) 0xffffffff)
 #define INADDR_LOOPBACK   ((in_addr_t) 0x7f000001)
 
+#define IN6ADDR_ANY_INIT      { { { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } } }
+#define IN6ADDR_LOOPBACK_INIT { { { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 } } }
+
 #define INET_ADDRSTRLEN  16
+#define INET6_ADDRSTRLEN 46
 
 #define IPPORT_ECHO 7
 #define IPPORT_DISCARD 9
@@ -86,6 +123,16 @@ struct sockaddr_in {
 #define IPPROTO_PUP      12
 #define IPPROTO_UDP      17
 #define IPPROTO_IDP      22
+#define IPPROTO_TP       29
+#define IPPROTO_IPV6     41
+#define IPPROTO_ROUTING  43
+#define IPPROTO_FRAGMENT 44
+#define IPPROTO_GRE      47
+#define IPPROTO_ESP      50
+#define IPPROTO_AH       51
+#define IPPROTO_ICMPV6   58
+#define IPPROTO_NONE     59
+#define IPPROTO_DSTOPTS  60
 #define IPPROTO_HELLO    63
 #define IPPROTO_ND       77
 #define IPPROTO_RAW      255
@@ -103,5 +150,28 @@ struct sockaddr_in {
 #define in_chkaddrlen(x) ((x) >= IN_MINADDRLEN && (x) <= IN_MAXADDRLEN)
 
 #define IP_OPTIONS 1
+
+#define IPV6_2292PKTOPTIONS 6
+#define IPV6_CHECKSUM 7
+#define IPV6_2292HOPLIMIT 8
+#define IPV6_UNICAST_HOPS 16
+#define IPV6_MULTICAST_IF 17
+#define IPV6_MULTICAST_HOPS 18
+#define IPV6_MULTICAST_LOOP 19
+#define IPV6_JOIN_GROUP 20
+#define IPV6_LEAVE_GROUP 21
+#define IPV6_MTU_DISCOVER 23
+#define IPV6_MTU 24
+#define IPV6_RECVERR 25
+#define IPV6_V6ONLY 26
+#define IPV6_RECVPKTINFO 49
+#define IPV6_PKTINFO 50
+#define IPV6_RECVHOPLIMIT 51
+#define IPV6_HOPLIMIT 52
+#define IPV6_RECVTCLASS 66
+#define IPV6_TCLASS 67
+
+#define IPV6_ADD_MEMBERSHIP IPV6_JOIN_GROUP
+#define IPV6_DROP_MEMBERSHIP IPV6_LEAVE_GROUP
 
 #endif /* _ABITBITS_IN_H */

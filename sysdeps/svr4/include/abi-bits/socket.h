@@ -2,6 +2,7 @@
 #define _ABIBITS_SOCKET_H
 
 #include <abi-bits/dev_t.h>
+#include <abi-bits/sockaddr_storage.h>
 #include <bits/size_t.h>
 #include <bits/posix/iovec.h>
 
@@ -86,7 +87,8 @@ struct socknewproto {
 #define AF_X25 20
 #define AF_OSINET 21
 #define AF_GOSIP 22
-#define AF_MAX 22
+#define AF_INET6 23
+#define AF_MAX 23
 
 #define PF_UNSPEC AF_UNSPEC
 #define PF_UNIX AF_UNIX
@@ -111,6 +113,7 @@ struct socknewproto {
 #define PF_X25 AF_X25
 #define PF_OSINET AF_OSINET
 #define PF_GOSIP AF_GOSIP
+#define PF_INET6 AF_INET6
 #define PF_MAX AF_MAX
 
 #define SO_DEBUG 0x0001
@@ -137,6 +140,7 @@ struct socknewproto {
 #define SO_PROTOTYPE 0x1009
 
 #define SOL_SOCKET 0xffff
+#define SOL_IPV6 41
 
 #define OPTLEN(x) ((((x) + sizeof(long) - 1) / sizeof(long)) * sizeof(long))
 #define OPTVAL(opt) ((char *)((opt) + 1))
