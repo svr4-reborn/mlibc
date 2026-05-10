@@ -175,15 +175,11 @@ constexpr bool syscall_should_restart(long number) {
 		case SYS_write:
 		case SYS_readv:
 		case SYS_writev:
-		case SYS_fcntl:
+		case SYS_open:
 		case SYS_ioctl:
-		case SYS_poll:
 		case SYS_wait:
 		case SYS_waitsys:
-		case SYS_getmsg:
-		case SYS_putmsg:
-		case SYS_getpmsg:
-		case SYS_putpmsg:
+		case SYS_hrtsys:
 			return true;
 		default:
 			return false;
@@ -197,7 +193,21 @@ syscall_ret syscall_call(long number, Args... args) {
 	while(true) {
 		auto state = syscall_state(number, args...);
 		auto ret = syscall_ret{syscall_state_value(state), syscall_state_carry(state)};
-		if(ret.failed && ret.value == ERESTART && syscall_should_restart(number))
+		if(ret.failed && ret.value == ERESTART) {
+			if(syscall_should_restart(number))
+				continue;
+			ret.value = EINTR;
+		}
+		return ret;
+	}
+}
+
+template<typename... Args>
+syscall_ret syscall_call_always_restart(long number, Args... args) {
+	while(true) {
+		auto state = syscall_state(number, args...);
+		auto ret = syscall_ret{syscall_state_value(state), syscall_state_carry(state)};
+		if(ret.failed && ret.value == ERESTART)
 			continue;
 		return ret;
 	}
@@ -209,8 +219,11 @@ syscall_ret2 syscall_call_dual(long number, Args... args) {
 		__sc_word_t value2;
 		auto state = syscall_state_dual(&value2, number, args...);
 		auto ret = syscall_ret2{syscall_state_value(state), static_cast<long>(value2), syscall_state_carry(state)};
-		if(ret.failed && ret.value == ERESTART && syscall_should_restart(number))
-			continue;
+		if(ret.failed && ret.value == ERESTART) {
+			if(syscall_should_restart(number))
+				continue;
+			ret.value = EINTR;
+		}
 		return ret;
 	}
 }
@@ -232,6 +245,9 @@ struct translated_dirent_span {
 constexpr size_t kSvr4DirentHeaderSize = offsetof(svr4_dirent_wire, d_name);
 constexpr size_t kPublicDirentHeaderSize = offsetof(struct dirent, d_name);
 constexpr size_t kMinSvr4DirentReclen = kSvr4DirentHeaderSize + 1;
+constexpr int kFdBitsPerMask = sizeof(fd_mask) * CHAR_BIT;
+constexpr int kAccessEffectiveIds = 010;
+constexpr rlim_t kSvr4RlimInfinity = 0x7fffffffUL;
 
 static_assert(kSvr4DirentHeaderSize == 10);
 
@@ -606,12 +622,20 @@ int require_at_path(int dirfd, const char *path) {
 	return 0;
 }
 
+constexpr rlim_t translate_from_kernel_rlimit(rlim_t value) {
+	return value == kSvr4RlimInfinity ? RLIM_INFINITY : value;
+}
+
+constexpr rlim_t translate_to_kernel_rlimit(rlim_t value) {
+	return value == RLIM_INFINITY ? kSvr4RlimInfinity : value;
+}
+
 bool local_fd_isset(int fd, const fd_set *set) {
-	return set->fds_bits[fd / 8] & (1 << (fd % 8));
+	return set->fds_bits[fd / kFdBitsPerMask] & (static_cast<fd_mask>(1) << (fd % kFdBitsPerMask));
 }
 
 void local_fd_set(int fd, fd_set *set) {
-	set->fds_bits[fd / 8] |= 1 << (fd % 8);
+	set->fds_bits[fd / kFdBitsPerMask] |= static_cast<fd_mask>(1) << (fd % kFdBitsPerMask);
 }
 
 void local_fd_zero(fd_set *set) {
@@ -1071,11 +1095,26 @@ int Sysdeps<SetGroups>::operator()(size_t size, const gid_t *list) {
 }
 
 int Sysdeps<GetRlimit>::operator()(int resource, struct rlimit *limit) {
-	return syscall_call(SYS_getrlimit, resource, limit).error();
+	if(!limit)
+		return EINVAL;
+
+	struct rlimit kernel_limit;
+	if(int e = syscall_call(SYS_getrlimit, resource, &kernel_limit).error(); e)
+		return e;
+
+	limit->rlim_cur = translate_from_kernel_rlimit(kernel_limit.rlim_cur);
+	limit->rlim_max = translate_from_kernel_rlimit(kernel_limit.rlim_max);
+	return 0;
 }
 
 int Sysdeps<SetRlimit>::operator()(int resource, const struct rlimit *limit) {
-	return syscall_call(SYS_setrlimit, resource, limit).error();
+	if(!limit)
+		return EINVAL;
+
+	struct rlimit kernel_limit = *limit;
+	kernel_limit.rlim_cur = translate_to_kernel_rlimit(kernel_limit.rlim_cur);
+	kernel_limit.rlim_max = translate_to_kernel_rlimit(kernel_limit.rlim_max);
+	return syscall_call(SYS_setrlimit, resource, &kernel_limit).error();
 }
 
 int Sysdeps<Nice>::operator()(int nice, int *new_nice) {
@@ -1563,10 +1602,12 @@ int Sysdeps<Access>::operator()(const char *path, int mode) {
 int Sysdeps<Faccessat>::operator()(int dirfd, const char *pathname, int mode, int flags) {
 	if(flags & ~(AT_EACCESS | AT_SYMLINK_NOFOLLOW))
 		return EINVAL;
-	if(flags)
+	if(flags & AT_SYMLINK_NOFOLLOW)
 		return ENOSYS;
 	if(int e = require_at_path(dirfd, pathname); e)
 		return e;
+	if(flags & AT_EACCESS)
+		mode |= kAccessEffectiveIds;
 	return sysdep<Access>(pathname, mode);
 }
 
@@ -1748,11 +1789,11 @@ int Sysdeps<Sockatmark>::operator()(int sockfd, int *out) {
 }
 
 int Sysdeps<Semget>::operator()(key_t key, int n, int fl, int *id) {
-	return syscall_call(SYS_semsys, kSemgetSubcode, key, n, fl).store(id);
+	return syscall_call_always_restart(SYS_semsys, kSemgetSubcode, key, n, fl).store(id);
 }
 
 int Sysdeps<Semctl>::operator()(int semid, int semnum, int cmd, void *semun, int *ret_value) {
-	return syscall_call(SYS_semsys, kSemctlSubcode, semid, semnum, cmd, semun).store(ret_value);
+	return syscall_call_always_restart(SYS_semsys, kSemctlSubcode, semid, semnum, cmd, semun).store(ret_value);
 }
 
 int Sysdeps<Semop>::operator()(int semid, struct sembuf *sops, size_t nsops) {
@@ -1760,27 +1801,27 @@ int Sysdeps<Semop>::operator()(int semid, struct sembuf *sops, size_t nsops) {
 }
 
 int Sysdeps<Shmat>::operator()(void **seg_start, int shmid, const void *shmaddr, int shmflg) {
-	return syscall_call(SYS_shmsys, kShmatSubcode, shmid, shmaddr, shmflg).store(seg_start);
+	return syscall_call_always_restart(SYS_shmsys, kShmatSubcode, shmid, shmaddr, shmflg).store(seg_start);
 }
 
 int Sysdeps<Shmctl>::operator()(int *idx, int shmid, int cmd, struct shmid_ds *buf) {
-	return syscall_call(SYS_shmsys, kShmctlSubcode, shmid, cmd, buf).store(idx);
+	return syscall_call_always_restart(SYS_shmsys, kShmctlSubcode, shmid, cmd, buf).store(idx);
 }
 
 int Sysdeps<Shmdt>::operator()(const void *shmaddr) {
-	return syscall_call(SYS_shmsys, kShmdtSubcode, shmaddr).error();
+	return syscall_call_always_restart(SYS_shmsys, kShmdtSubcode, shmaddr).error();
 }
 
 int Sysdeps<Shmget>::operator()(int *shm_id, key_t key, size_t size, int shmflg) {
-	return syscall_call(SYS_shmsys, kShmgetSubcode, key, size, shmflg).store(shm_id);
+	return syscall_call_always_restart(SYS_shmsys, kShmgetSubcode, key, size, shmflg).store(shm_id);
 }
 
 int Sysdeps<Msgctl>::operator()(int q, int cmd, struct msqid_ds *buf) {
-	return syscall_call(SYS_msgsys, kMsgctlSubcode, q, cmd, buf).error();
+	return syscall_call_always_restart(SYS_msgsys, kMsgctlSubcode, q, cmd, buf).error();
 }
 
 int Sysdeps<Msgget>::operator()(key_t k, int flag, int *out) {
-	return syscall_call(SYS_msgsys, kMsggetSubcode, k, flag).store(out);
+	return syscall_call_always_restart(SYS_msgsys, kMsggetSubcode, k, flag).store(out);
 }
 
 int Sysdeps<Msgrcv>::operator()(int msqid, void *msgp, size_t msgsz, long msgtyp, int msgflg, ssize_t *out) {
