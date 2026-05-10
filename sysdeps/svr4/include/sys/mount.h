@@ -7,6 +7,9 @@ extern "C" {
 
 // Keep the public shape close to Linux userspace while using the native SVR4
 // flag values where the semantics line up.
+// On SVR4, this compatibility interface interprets mount()'s data argument as
+// a NUL-terminated option string because the native kernel ABI requires an
+// explicit byte count for mount data.
 #define MS_RDONLY 1
 #define MS_HADBAD 8
 #define MS_NOSUID 16

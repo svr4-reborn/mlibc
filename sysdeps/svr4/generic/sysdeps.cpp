@@ -254,6 +254,14 @@ struct ssd {
 		unsigned long res;
 	};
 
+	struct svr4_kernel_utsname {
+		char sysname[257];
+		char nodename[257];
+		char release[257];
+		char version[257];
+		char machine[257];
+	};
+
 constexpr int kSi86Dscr = 75;
 constexpr unsigned int kUserDataAcc1 = 0xF2;
 constexpr unsigned int kDataAcc2 = 0xC;
@@ -300,6 +308,16 @@ constexpr int kSockSocketSubcode = 14;
 constexpr unsigned long kSiocSocksys = 0x801c6956;
 constexpr unsigned long kSiocAtmark = 0x40047307;
 constexpr long kClockTicksPerSecond = 100;
+
+template<size_t N>
+void copy_uts_field(char (&destination)[N], const char *source) {
+	size_t length = 0;
+	while(length + 1 < N && source[length]) {
+		destination[length] = source[length];
+		++length;
+	}
+	destination[length] = '\0';
+}
 
 void timeval_from_clock_ticks(clock_t ticks, timeval *tv) {
 	tv->tv_sec = ticks / kClockTicksPerSecond;
@@ -499,12 +517,12 @@ int translate_svr4_dirents(const void *raw_buffer, size_t raw_bytes, void *buffe
 
 int open_socket_bootstrap() {
 	constexpr const char *paths[] = {
-		"/dev/socksys",
-		"/dev/sock"
+		"/dev/sock",
+		"/dev/socksys"
 	};
 
-	// Different SVR4-derived systems expose the STREAMS socket entry point under
-	// different device nodes; try the common ones in order.
+	// This tree stages the clone device as /dev/sock. Keep /dev/socksys as a
+	// compatibility fallback for derived setups that still expose that name.
 	int last_error = ENOENT;
 	for(const char *path : paths) {
 		auto opened = syscall_call(SYS_open, path, O_RDWR, 0);
@@ -1131,7 +1149,16 @@ int Sysdeps<Times>::operator()(struct tms *tms, clock_t *out) {
 }
 
 int Sysdeps<Uname>::operator()(struct utsname *buf) {
-	return syscall_call(SYS_uname, buf).error();
+	svr4_kernel_utsname kernel_buf{};
+	if(int e = syscall_call(SYS_uname, &kernel_buf).error(); e)
+		return e;
+
+	copy_uts_field(buf->sysname, kernel_buf.sysname);
+	copy_uts_field(buf->nodename, kernel_buf.nodename);
+	copy_uts_field(buf->release, kernel_buf.release);
+	copy_uts_field(buf->version, kernel_buf.version);
+	copy_uts_field(buf->machine, kernel_buf.machine);
+	return 0;
 }
 
 int Sysdeps<Ioctl>::operator()(int fd, unsigned long request, void *arg, int *result) {
@@ -1142,7 +1169,12 @@ int Sysdeps<Ioctl>::operator()(int fd, unsigned long request, void *arg, int *re
 
 int Sysdeps<Isatty>::operator()(int fd) {
 	struct termios termios_hack;
-	return syscall_call(SYS_ioctl, fd, TCGETS, &termios_hack).error();
+	if(int e = syscall_call(SYS_ioctl, fd, TCGETS, &termios_hack).error(); e) {
+		if(e == EINVAL || e == ENOSTR)
+			return ENOTTY;
+		return e;
+	}
+	return 0;
 }
 
 int Sysdeps<Ttyname>::operator()(int fd, char *buf, size_t size) {
@@ -1349,6 +1381,9 @@ int Sysdeps<Pselect>::operator()(int num_fds, fd_set *read_set, fd_set *write_se
 
 	int mask_error = 0;
 	sigset_t old_mask;
+	// SVR4 exposes poll() and sigprocmask() separately but has no atomic
+	// pselect()-style syscall. This is a best-effort emulation of the Linux/POSIX
+	// interface rather than a fully atomic mask-swap-and-wait primitive.
 	if(sigmask)
 		mask_error = sysdep<Sigprocmask>(SIG_SETMASK, sigmask, &old_mask);
 	if(mask_error)
@@ -1397,9 +1432,34 @@ int Sysdeps<FutexWake>::operator()(int *, bool) {
 	return 0;
 }
 
-int Sysdeps<FutexWait>::operator()(int *, int, const struct timespec *) {
-	//SVR4_STUB();
-	return 0;
+int Sysdeps<FutexWait>::operator()(int *pointer, int expected, const struct timespec *time) {
+	if(!pointer)
+		return EINVAL;
+
+	if(__atomic_load_n(pointer, __ATOMIC_RELAXED) != expected)
+		return EAGAIN;
+
+	if(!time)
+		return ENOSYS;
+
+	if(time->tv_sec < 0 || time->tv_nsec < 0 || time->tv_nsec >= 1000000000L)
+		return EINVAL;
+
+	long long remaining_ms = static_cast<long long>(time->tv_sec) * 1000;
+	remaining_ms += (time->tv_nsec + 999999) / 1000000;
+	while(true) {
+		int timeout_ms = remaining_ms > INT_MAX ? INT_MAX : static_cast<int>(remaining_ms);
+		auto ret = syscall_call(SYS_poll, static_cast<struct pollfd *>(nullptr), 0, timeout_ms);
+		if(int e = ret.error(); e)
+			return e;
+
+		if(__atomic_load_n(pointer, __ATOMIC_RELAXED) != expected)
+			return EAGAIN;
+
+		if(remaining_ms <= INT_MAX)
+			return ETIMEDOUT;
+		remaining_ms -= INT_MAX;
+	}
 }
 
 int Sysdeps<ClockGet>::operator()(int clock, time_t* secs, long* nanos) {

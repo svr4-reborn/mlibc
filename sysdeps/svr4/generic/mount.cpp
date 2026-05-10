@@ -21,6 +21,23 @@ constexpr unsigned long kSupportedMountFlags = MS_RDONLY | MS_HADBAD
 constexpr const char *kMnttabLockPath = "/etc/.mnttab.lock";
 constexpr const char *kMnttabTempPath = "/etc/.mnttab.tmp";
 
+int compute_mount_data_length(const char *mount_data, int *length) {
+	if(!mount_data) {
+		*length = 0;
+		return 0;
+	}
+
+	// mlibc's public mount() contract only carries an untyped pointer.
+	// On SVR4 the best compatible mapping is the traditional NUL-terminated
+	// option string expected by most userland mount callers.
+	auto mount_data_length = strlen(mount_data) + 1;
+	if(mount_data_length > INT_MAX)
+		return EINVAL;
+
+	*length = static_cast<int>(mount_data_length);
+	return 0;
+}
+
 char *find_option(char *options, const char *opt) {
 	if(!options || !opt)
 		return nullptr;
@@ -228,19 +245,15 @@ int mount(const char *source, const char *target,
 		return -1;
 	}
 
-	// Linux-style mount data is commonly a NUL-terminated options string,
-	// while the SVR4 syscall ABI requires an explicit byte count.
 	auto mount_data = static_cast<const char *>(data);
-	size_t mount_data_length = 0;
-	if(mount_data)
-		mount_data_length = strlen(mount_data) + 1;
-	if(mount_data_length > INT_MAX) {
-		errno = EINVAL;
+	int mount_data_length;
+	if(int e = compute_mount_data_length(mount_data, &mount_data_length); e) {
+		errno = e;
 		return -1;
 	}
 
 	if(syscall(SYS_mount, source, target, static_cast<int>(flags | kSvr4MountData),
-			fstype, mount_data, static_cast<int>(mount_data_length)) < 0)
+			fstype, mount_data, mount_data_length) < 0)
 		return -1;
 
 	char options[MNT_LINE_MAX];
