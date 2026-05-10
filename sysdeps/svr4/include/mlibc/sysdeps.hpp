@@ -112,9 +112,13 @@ struct Svr4SysdepTags :
 	Writev
 #ifdef __MLIBC_POSIX_OPTION
 	,
+	Fadvise,
 	Fstatvfs,
+	GetHostname,
 	GetGroups,
 	GetPgid,
+	GetResgid,
+	GetResuid,
 	GetSid,
 	Isatty,
 	Pselect,

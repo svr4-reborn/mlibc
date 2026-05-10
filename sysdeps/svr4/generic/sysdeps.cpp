@@ -307,6 +307,7 @@ constexpr int kSockShutdownSubcode = 13;
 constexpr int kSockSocketSubcode = 14;
 constexpr unsigned long kSiocSocksys = 0x801c6956;
 constexpr unsigned long kSiocAtmark = 0x40047307;
+constexpr int kSiHostnameCommand = 2;
 constexpr long kClockTicksPerSecond = 100;
 
 template<size_t N>
@@ -659,6 +660,33 @@ gid_t Sysdeps<GetEgid>::operator()() {
 
 pid_t Sysdeps<GetPpid>::operator()() {
 	return static_cast<pid_t>(syscall_call_dual(SYS_getpid).value2);
+}
+
+int Sysdeps<GetHostname>::operator()(char *buffer, size_t bufsize) {
+	if(!bufsize)
+		return ENAMETOOLONG;
+
+	long required_length;
+	if(int e = syscall_call(SYS_systeminfo, kSiHostnameCommand, buffer, bufsize)
+			.store(&required_length); e)
+		return e;
+	if(static_cast<size_t>(required_length) > bufsize)
+		return ENAMETOOLONG;
+	return 0;
+}
+
+int Sysdeps<GetResuid>::operator()(uid_t *ruid, uid_t *euid, uid_t *suid) {
+	(void)ruid;
+	(void)euid;
+	(void)suid;
+	return ENOSYS;
+}
+
+int Sysdeps<GetResgid>::operator()(gid_t *rgid, gid_t *egid, gid_t *sgid) {
+	(void)rgid;
+	(void)egid;
+	(void)sgid;
+	return ENOSYS;
 }
 
 int Sysdeps<Chdir>::operator()(const char *path) {
@@ -1103,6 +1131,16 @@ int Sysdeps<Fsync>::operator()(int fd) {
 
 int Sysdeps<Fdatasync>::operator()(int fd) {
 	return syscall_call(SYS_fsync, fd).error();
+}
+
+int Sysdeps<Fadvise>::operator()(int fd, off_t offset, off_t length, int advice) {
+	(void)fd;
+	(void)offset;
+	(void)length;
+
+	if(advice < POSIX_FADV_NORMAL || advice > POSIX_FADV_NOREUSE)
+		return EINVAL;
+	return ENOSYS;
 }
 
 int Sysdeps<Fcntl>::operator()(int fd, int request, va_list args, int *result) {
