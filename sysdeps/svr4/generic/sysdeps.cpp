@@ -1391,7 +1391,9 @@ int Sysdeps<Pause>::operator()() {
 }
 
 int Sysdeps<FutexWake>::operator()(int *, bool) {
-	//SVR4_STUB();
+	// The current SVR4 port has no kernel futex primitive. Returning success here
+	// preserves uncontended single-threaded paths while FutexWait reports the
+	// unsupported blocking case below.
 	return 0;
 }
 
