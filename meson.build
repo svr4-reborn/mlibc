@@ -606,6 +606,10 @@ if not headers_only
 	]
 
 	ld_library_name = get_option('ld_library_name')
+	ld_shared_link_args = mlibc_link_args
+	if host_machine.system() == 'svr4'
+		ld_shared_link_args += ['-Wl,-z,norelro']
+	endif
 
 	# Our libraries have different behaviour when built as static and shared libraries.
 	# Hence we need to rebuild the object files with a different define for each mode.
@@ -636,7 +640,7 @@ if not headers_only
 		ld_shared_lib = shared_library(ld_library_name, rtld_sources + rtld_dso_sources,
 			name_prefix: '',
 			cpp_args: mlibc_c_args + ld_cpp_args,
-			link_args: mlibc_link_args,
+			link_args: ld_shared_link_args,
 			include_directories: rtld_include_dirs,
 			dependencies: rtld_deps + rtlib_deps,
 			install: true

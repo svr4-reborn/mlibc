@@ -275,6 +275,26 @@ double tgamma(double __x);
 float tgammaf(float __x);
 long double tgammal(long double __x);
 
+#if defined(_DEFAULT_SOURCE) || defined(_GNU_SOURCE) || __MLIBC_XOPEN
+double j0(double __x);
+float j0f(float __x);
+
+double j1(double __x);
+float j1f(float __x);
+
+double jn(int __n, double __x);
+float jnf(int __n, float __x);
+
+double y0(double __x);
+float y0f(float __x);
+
+double y1(double __x);
+float y1f(float __x);
+
+double yn(int __n, double __x);
+float ynf(int __n, float __x);
+#endif
+
 /* [C11/7.12.9 Nearest integer functions] */
 
 double ceil(double __x);

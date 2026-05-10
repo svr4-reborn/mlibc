@@ -1,7 +1,10 @@
 #include <errno.h>
+#include <dirent.h>
+#include <limits.h>
 #include <poll.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/select.h>
 
 #include <type_traits>
 
@@ -18,6 +21,9 @@
 #include <mlibc/all-sysdeps.hpp>
 #include <mlibc/debug.hpp>
 #include <mlibc/tcb.hpp>
+
+extern "C" [[gnu::visibility("hidden")]] void __mlibc_signal_restore(void);
+extern "C" [[gnu::visibility("hidden")]] void __mlibc_signal_restore_rt(void);
 
 /// SVR4 syscalls are a bit weird, compared to more modern kernels.
 /// Not only are they done via far calls and call gates, they return whether
@@ -163,22 +169,71 @@ struct syscall_ret2 {
 	}
 };
 
+constexpr bool syscall_should_restart(long number) {
+	switch(number) {
+		case SYS_read:
+		case SYS_write:
+		case SYS_readv:
+		case SYS_writev:
+		case SYS_fcntl:
+		case SYS_ioctl:
+		case SYS_poll:
+		case SYS_wait:
+		case SYS_waitsys:
+		case SYS_getmsg:
+		case SYS_putmsg:
+		case SYS_getpmsg:
+		case SYS_putpmsg:
+			return true;
+		default:
+			return false;
+	}
+}
+
 /// Run a syscall.
 /// Returns a syscall_ret struct containing the return value and whether the syscall failed.
 template<typename... Args>
 syscall_ret syscall_call(long number, Args... args) {
-	auto state = syscall_state(number, args...);
-	return {syscall_state_value(state), syscall_state_carry(state)};
+	while(true) {
+		auto state = syscall_state(number, args...);
+		auto ret = syscall_ret{syscall_state_value(state), syscall_state_carry(state)};
+		if(ret.failed && ret.value == ERESTART && syscall_should_restart(number))
+			continue;
+		return ret;
+	}
 }
 
 template<typename... Args>
 syscall_ret2 syscall_call_dual(long number, Args... args) {
-	__sc_word_t value2;
-	auto state = syscall_state_dual(&value2, number, args...);
-	return {syscall_state_value(state), static_cast<long>(value2), syscall_state_carry(state)};
+	while(true) {
+		__sc_word_t value2;
+		auto state = syscall_state_dual(&value2, number, args...);
+		auto ret = syscall_ret2{syscall_state_value(state), static_cast<long>(value2), syscall_state_carry(state)};
+		if(ret.failed && ret.value == ERESTART && syscall_should_restart(number))
+			continue;
+		return ret;
+	}
 }
 
 namespace {
+
+struct svr4_dirent_wire {
+	uint32_t d_ino;
+	int32_t d_off;
+	uint16_t d_reclen;
+	char d_name[1];
+};
+
+struct translated_dirent_span {
+	size_t raw_offset;
+	size_t public_reclen;
+};
+
+constexpr size_t kSvr4DirentHeaderSize = offsetof(svr4_dirent_wire, d_name);
+constexpr size_t kPublicDirentHeaderSize = offsetof(struct dirent, d_name);
+constexpr size_t kMinSvr4DirentReclen = kSvr4DirentHeaderSize + 1;
+
+static_assert(kSvr4DirentHeaderSize == 10);
 
 struct ssd {
 	unsigned int sel;
@@ -187,12 +242,30 @@ struct ssd {
 	unsigned int acc1;
 	unsigned int acc2;
 };
+	struct svr4_interval {
+		unsigned long word1;
+		unsigned long word2;
+		int clock;
+	};
+	
+	struct svr4_hrtime {
+		unsigned long secs;
+		long rem;
+		unsigned long res;
+	};
 
 constexpr int kSi86Dscr = 75;
 constexpr unsigned int kUserDataAcc1 = 0xF2;
 constexpr unsigned int kDataAcc2 = 0xC;
 constexpr unsigned int kFirstTlsSelectorIndex = 7;
 constexpr unsigned int kMaxLdtIndex = 8192;
+constexpr int kHrtsysCntlOpcode = 0;
+constexpr int kHrtGetResCommand = 0;
+constexpr int kHrtTofdCommand = 1;
+constexpr int kHrtStartItCommand = 2;
+constexpr int kHrtGetItCommand = 3;
+constexpr int kClockStd = 0x0001;
+constexpr unsigned long kNanosecondsPerSecond = 1000000000UL;
 constexpr int kMsggetSubcode = 0;
 constexpr int kMsgctlSubcode = 1;
 constexpr int kMsgrcvSubcode = 2;
@@ -208,6 +281,7 @@ constexpr int kPgrpGetSidSubcode = 2;
 constexpr int kPgrpSetSidSubcode = 3;
 constexpr int kPgrpGetPgidSubcode = 4;
 constexpr int kPgrpSetPgidSubcode = 5;
+constexpr int kClocalDebugconWriteSubcode = 1;
 constexpr int kSigpendingSubcode = 1;
 constexpr int kSockAcceptSubcode = 1;
 constexpr int kSockBindSubcode = 2;
@@ -225,6 +299,68 @@ constexpr int kSockShutdownSubcode = 13;
 constexpr int kSockSocketSubcode = 14;
 constexpr unsigned long kSiocSocksys = 0x801c6956;
 constexpr unsigned long kSiocAtmark = 0x40047307;
+constexpr long kClockTicksPerSecond = 100;
+
+void timeval_from_clock_ticks(clock_t ticks, timeval *tv) {
+	tv->tv_sec = ticks / kClockTicksPerSecond;
+	tv->tv_usec = (ticks % kClockTicksPerSecond) * 1000000 / kClockTicksPerSecond;
+}
+
+int translate_hrtime_result(const svr4_hrtime &time, time_t *secs, long *nanos) {
+	if(time.res != kNanosecondsPerSecond)
+		return EIO;
+	if(time.rem < 0 || static_cast<unsigned long>(time.rem) >= kNanosecondsPerSecond)
+		return EIO;
+	*secs = static_cast<time_t>(time.secs);
+	*nanos = time.rem;
+	return 0;
+}
+
+int fetch_realtime(time_t *secs, long *nanos) {
+	svr4_hrtime time{0, 0, kNanosecondsPerSecond};
+	if(int e = syscall_call(SYS_hrtsys, kHrtsysCntlOpcode, kHrtTofdCommand,
+			kClockStd, static_cast<svr4_interval *>(nullptr), &time).error(); e)
+		return e;
+	return translate_hrtime_result(time, secs, nanos);
+}
+
+int fetch_monotonic(time_t *secs, long *nanos) {
+	static svr4_interval start_interval;
+	static int init_state;
+
+	auto state = __atomic_load_n(&init_state, __ATOMIC_ACQUIRE);
+	while(state != 2) {
+		if(state == 0) {
+			int expected = 0;
+			if(__atomic_compare_exchange_n(&init_state, &expected, 1, false,
+					__ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+				if(int e = syscall_call(SYS_hrtsys, kHrtsysCntlOpcode,
+						kHrtStartItCommand, kClockStd, &start_interval,
+						static_cast<svr4_hrtime *>(nullptr)).error(); e) {
+					__atomic_store_n(&init_state, 0, __ATOMIC_RELEASE);
+					return e;
+				}
+				__atomic_store_n(&init_state, 2, __ATOMIC_RELEASE);
+				break;
+			}
+		} else {
+			__asm__ __volatile__("pause");
+		}
+		state = __atomic_load_n(&init_state, __ATOMIC_ACQUIRE);
+	}
+
+	svr4_hrtime time{0, 0, kNanosecondsPerSecond};
+	if(int e = syscall_call(SYS_hrtsys, kHrtsysCntlOpcode, kHrtGetItCommand,
+			kClockStd, &start_interval, &time).error(); e)
+		return e;
+	return translate_hrtime_result(time, secs, nanos);
+}
+
+void fill_wait_rusage(const siginfo_t &info, struct rusage *ru) {
+	memset(ru, 0, sizeof(struct rusage));
+	timeval_from_clock_ticks(info.si_utime, &ru->ru_utime);
+	timeval_from_clock_ticks(info.si_stime, &ru->ru_stime);
+}
 
 
 // socksysreq stores its payload in int slots, matching the historical SVR4
@@ -258,6 +394,14 @@ unsigned int allocate_tls_selector() {
 	return make_ldt_selector(index);
 }
 
+size_t bounded_cstring_length(const char *string, size_t limit) {
+	for(size_t i = 0; i < limit; ++i) {
+		if(!string[i])
+			return i;
+	}
+	return limit;
+}
+
 int set_socket_flags(int fd, int flags) {
 	if(flags & ~(SOCK_CLOEXEC | SOCK_NONBLOCK))
 		return EINVAL;
@@ -275,6 +419,81 @@ int set_socket_flags(int fd, int flags) {
 			return e;
 	}
 
+	return 0;
+}
+
+size_t getdents_raw_budget(size_t max_size) {
+	constexpr size_t per_record_growth = kPublicDirentHeaderSize - kSvr4DirentHeaderSize;
+	constexpr size_t max_kernel_getdents_count = INT_MAX;
+	constexpr size_t total_record_growth = kMinSvr4DirentReclen + per_record_growth;
+	if(!per_record_growth)
+		return max_size < max_kernel_getdents_count ? max_size : max_kernel_getdents_count;
+
+	auto quotient = max_size / total_record_growth;
+	auto remainder = max_size % total_record_growth;
+	auto budget = quotient * kMinSvr4DirentReclen;
+	budget += (remainder * kMinSvr4DirentReclen) / total_record_growth;
+	if(budget > max_kernel_getdents_count)
+		budget = max_kernel_getdents_count;
+	if(budget < kMinSvr4DirentReclen)
+		budget = kMinSvr4DirentReclen;
+	return budget;
+}
+
+int translate_svr4_dirents(const void *raw_buffer, size_t raw_bytes, void *buffer, size_t max_size,
+		size_t *translated_bytes) {
+	if(!raw_bytes) {
+		*translated_bytes = 0;
+		return 0;
+	}
+
+	auto raw_bytes_view = reinterpret_cast<const char *>(raw_buffer);
+	auto bytes = reinterpret_cast<char *>(buffer);
+	auto max_entries = raw_bytes / kMinSvr4DirentReclen + 1;
+	auto spans = reinterpret_cast<translated_dirent_span *>(__builtin_alloca(max_entries * sizeof(translated_dirent_span)));
+
+	size_t raw_offset = 0;
+	size_t total_public_bytes = 0;
+	size_t count = 0;
+
+	while(raw_offset < raw_bytes) {
+		if(raw_bytes - raw_offset < kSvr4DirentHeaderSize)
+			return EIO;
+
+		auto raw = reinterpret_cast<const svr4_dirent_wire *>(raw_bytes_view + raw_offset);
+		if(raw->d_reclen < kMinSvr4DirentReclen || raw_offset + raw->d_reclen > raw_bytes)
+			return EIO;
+
+		auto raw_name_size = static_cast<size_t>(raw->d_reclen) - kSvr4DirentHeaderSize;
+		auto name_length = bounded_cstring_length(raw->d_name, raw_name_size);
+		if(name_length == raw_name_size)
+			return EIO;
+
+		auto public_reclen = kPublicDirentHeaderSize + name_length + 1;
+		if(total_public_bytes > max_size - public_reclen)
+			return EIO;
+
+		spans[count++] = {raw_offset, public_reclen};
+		total_public_bytes += public_reclen;
+		raw_offset += raw->d_reclen;
+	}
+
+	size_t public_offset = total_public_bytes;
+	while(count--) {
+		auto raw = reinterpret_cast<const svr4_dirent_wire *>(raw_bytes_view + spans[count].raw_offset);
+		auto raw_name_size = static_cast<size_t>(raw->d_reclen) - kSvr4DirentHeaderSize;
+		auto name_length = bounded_cstring_length(raw->d_name, raw_name_size);
+
+		public_offset -= spans[count].public_reclen;
+		auto translated = reinterpret_cast<struct dirent *>(bytes + public_offset);
+		translated->d_ino = raw->d_ino;
+		translated->d_off = raw->d_off;
+		translated->d_reclen = spans[count].public_reclen;
+		translated->d_type = DT_UNKNOWN;
+		memcpy(translated->d_name, raw->d_name, name_length + 1);
+	}
+
+	*translated_bytes = total_public_bytes;
 	return 0;
 }
 
@@ -340,6 +559,26 @@ int waitid_options_from_waitpid_flags(int flags) {
 	return options;
 }
 
+int translate_waitsys_idtype(idtype_t idtype, int &kernel_idtype) {
+	// SVR4 waitsys() uses the kernel's procset.h numbering rather than
+	// mlibc's public POSIX-facing idtype_t enum values.
+	switch(idtype) {
+		case P_ALL:
+			kernel_idtype = 7;
+			return 0;
+		case P_PID:
+			kernel_idtype = 0;
+			return 0;
+		case P_PGID:
+			kernel_idtype = 2;
+			return 0;
+		case P_PIDFD:
+			return EINVAL;
+		default:
+			return EINVAL;
+	}
+}
+
 int require_at_path(int dirfd, const char *path) {
 	if(dirfd != AT_FDCWD)
 		return ENOSYS;
@@ -348,10 +587,22 @@ int require_at_path(int dirfd, const char *path) {
 	return 0;
 }
 
+bool local_fd_isset(int fd, const fd_set *set) {
+	return set->fds_bits[fd / 8] & (1 << (fd % 8));
+}
+
+void local_fd_set(int fd, fd_set *set) {
+	set->fds_bits[fd / 8] |= 1 << (fd % 8);
+}
+
+void local_fd_zero(fd_set *set) {
+	memset(set->fds_bits, 0, sizeof(set->fds_bits));
+}
+
 } // namespace
 
 #define SVR4_STUB() do { \
-	mlibc::infoLogger() << "mlibc: " << __func__ \
+	mlibc::infoLogger() << "mlibc: " << __PRETTY_FUNCTION__ \
 		<< " is stubbed for sysdeps/svr4" << frg::endlog; \
 	return ENOSYS; \
 } while(0)
@@ -360,9 +611,7 @@ namespace mlibc {
 
 void Sysdeps<LibcLog>::operator()(const char *message) {
 	size_t length = strlen(message);
-	(void)syscall_call(SYS_write, 2, message, length);
-	char lf = '\n';
-	(void)syscall_call(SYS_write, 2, &lf, 1);
+	(void)syscall_call(SYS_clocal, kClocalDebugconWriteSubcode, message, length, 0, 0);
 }
 
 void Sysdeps<LibcPanic>::operator()() {
@@ -488,11 +737,15 @@ int Sysdeps<OpenDir>::operator()(const char *path, int *handle) {
 }
 
 int Sysdeps<ReadEntries>::operator()(int handle, void *buffer, size_t max_size, size_t *bytes_read) {
+	if(max_size < kPublicDirentHeaderSize + 1)
+		return EINVAL;
+
+	auto raw_budget = getdents_raw_budget(max_size);
+	auto raw_buffer = reinterpret_cast<char *>(__builtin_alloca(raw_budget));
 	long result;
-	if(int e = syscall_call(SYS_getdents, handle, buffer, max_size).store(&result); e)
+	if(int e = syscall_call(SYS_getdents, handle, raw_buffer, raw_budget).store(&result); e)
 		return e;
-	*bytes_read = static_cast<size_t>(result);
-	return 0;
+	return translate_svr4_dirents(raw_buffer, static_cast<size_t>(result), buffer, max_size, bytes_read);
 }
 
 int Sysdeps<Close>::operator()(int fd) {
@@ -552,7 +805,7 @@ int Sysdeps<Seek>::operator()(int fd, off_t offset, int whence, off_t *new_offse
 
 int Sysdeps<AnonAllocate>::operator()(size_t size, void **pointer) {
 	return sysdep<VmMap>(nullptr, size, PROT_READ | PROT_WRITE,
-			MAP_PRIVATE | MAP_ANONYMOUS, -1, 0, pointer);
+			MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0, pointer);
 }
 
 int Sysdeps<AnonFree>::operator()(void *pointer, size_t size) {
@@ -575,8 +828,10 @@ int Sysdeps<VmMap>::operator()(void *hint, size_t size, int prot, int flags,
 	int ret_error = syscall_call(SYS_mmap, hint, size, prot, flags, map_fd, offset).store(&mapped_window);
 	if(temporary_fd != -1)
 		(void)syscall_call(SYS_close, temporary_fd);
-	if(ret_error)
+	if(ret_error) {
+		mlibc::infoLogger() << "mlibc: mmap syscall failed in VmMap with error " << ret_error << frg::endlog;
 		return ret_error;
+	}
 	*window = mapped_window;
 	return 0;
 }
@@ -621,7 +876,19 @@ int Sysdeps<Sigprocmask>::operator()(int how, const sigset_t *__restrict set, si
 
 int Sysdeps<Sigaction>::operator()(int sn, const struct sigaction *__restrict act,
 		struct sigaction *__restrict old) {
-	return syscall_call(SYS_sigaction, sn, act, old).error();
+	struct sigaction translated_action;
+	auto translated_ptr = act;
+	if(act) {
+		translated_action = *act;
+		if(translated_action.sa_handler != SIG_DFL && translated_action.sa_handler != SIG_IGN) {
+			auto restorer = (translated_action.sa_flags & SA_SIGINFO)
+					? &__mlibc_signal_restore_rt
+					: &__mlibc_signal_restore;
+			translated_action.sa_resv[0] = static_cast<int>(reinterpret_cast<intptr_t>(restorer));
+		}
+		translated_ptr = &translated_action;
+	}
+	return syscall_call(SYS_sigaction, sn, translated_ptr, old).error();
 }
 
 int Sysdeps<Sigsuspend>::operator()(const sigset_t *set) {
@@ -637,36 +904,54 @@ int Sysdeps<Sigpending>::operator()(sigset_t *set) {
 }
 
 int Sysdeps<Waitid>::operator()(idtype_t idtype, id_t id, siginfo_t *info, int options) {
-	return syscall_call(SYS_waitsys, idtype, id, info, options).error();
+	int kernel_idtype;
+	if(int e = translate_waitsys_idtype(idtype, kernel_idtype); e)
+		return e;
+	return syscall_call(SYS_waitsys, kernel_idtype, id, info, options).error();
 }
 
 int Sysdeps<Waitpid>::operator()(pid_t pid, int *status, int flags, struct rusage *ru, pid_t *ret_pid) {
-	idtype_t idtype;
+	int kernel_idtype;
 	id_t id;
 
 	if(pid > 0) {
-		idtype = P_PID;
+		kernel_idtype = 0;
 		id = pid;
 	} else if(pid == -1) {
-		idtype = P_ALL;
+		kernel_idtype = 7;
 		id = 0;
+	} else if(pid == 0) {
+		kernel_idtype = 2;
+		if(int e = syscall_call(SYS_pgrpsys, kPgrpGetPgidSubcode, 0).store(&id); e)
+			return e;
 	} else {
-		idtype = P_PGID;
-		id = (pid == 0) ? 0 : -pid;
+		kernel_idtype = 2;
+		id = -pid;
 	}
 
-	siginfo_t info{};
-	if(int e = syscall_call(SYS_waitsys, idtype, id, &info,
-			waitid_options_from_waitpid_flags(flags)).error(); e)
-		return e;
+	while(true) {
+		siginfo_t info{};
+		auto options = waitid_options_from_waitpid_flags(flags);
+		if(int e = syscall_call(SYS_waitsys, kernel_idtype, id, &info, options).error(); e) {
+			return e;
+		}
 
-	if(ret_pid)
-		*ret_pid = info.si_pid;
-	if(status)
-		*status = wait_status_from_siginfo(info);
-	if(ru)
-		memset(ru, 0, sizeof(struct rusage));
-	return 0;
+		if(!info.si_pid) {
+			if(ret_pid)
+				*ret_pid = 0;
+			if(ru)
+				memset(ru, 0, sizeof(struct rusage));
+			return 0;
+		}
+
+		if(ret_pid)
+			*ret_pid = info.si_pid;
+		if(status)
+			*status = wait_status_from_siginfo(info);
+		if(ru)
+			fill_wait_rusage(info, ru);
+		return 0;
+	}
 }
 
 int Sysdeps<TcbSet>::operator()(void *pointer) {
@@ -860,6 +1145,92 @@ int Sysdeps<Isatty>::operator()(int fd) {
 	return syscall_call(SYS_ioctl, fd, TCGETS, &termios_hack).error();
 }
 
+int Sysdeps<Ttyname>::operator()(int fd, char *buf, size_t size) {
+	if(!buf)
+		return EINVAL;
+	if(!size)
+		return ERANGE;
+
+	if(int e = sysdep<Isatty>(fd); e)
+		return e;
+
+	struct stat target_stat;
+	if(int e = sysdep<Stat>(fsfd_target::fd, fd, nullptr, 0, &target_stat); e)
+		return e;
+
+	int dir_handle;
+	if(int e = sysdep<OpenDir>("/dev", &dir_handle); e)
+		return e;
+
+	char entry_buffer[2048];
+	char fallback_path[PATH_MAX + 1];
+	bool have_fallback = false;
+
+	while(true) {
+		size_t bytes_read;
+		if(int e = sysdep<ReadEntries>(dir_handle, entry_buffer, sizeof(entry_buffer), &bytes_read); e) {
+			(void)sysdep<Close>(dir_handle);
+			return e;
+		}
+
+		if(!bytes_read)
+			break;
+
+		for(size_t offset = 0; offset < bytes_read; ) {
+			auto ent = reinterpret_cast<struct dirent *>(entry_buffer + offset);
+			if(!ent->d_reclen || offset + ent->d_reclen > bytes_read) {
+				(void)sysdep<Close>(dir_handle);
+				return EIO;
+			}
+
+			offset += ent->d_reclen;
+
+			if(!__builtin_strcmp(ent->d_name, ".") || !__builtin_strcmp(ent->d_name, ".."))
+				continue;
+
+			size_t name_length = strlen(ent->d_name);
+			size_t path_length = 5 + name_length;
+			if(path_length + 1 > sizeof(fallback_path))
+				continue;
+
+			char candidate_path[PATH_MAX + 1];
+			memcpy(candidate_path, "/dev/", 5);
+			memcpy(candidate_path + 5, ent->d_name, name_length + 1);
+
+			struct stat candidate_stat;
+			if(int e = sysdep<Stat>(fsfd_target::path, -1, candidate_path, AT_SYMLINK_NOFOLLOW, &candidate_stat); e)
+				continue;
+
+			if(!S_ISCHR(candidate_stat.st_mode))
+				continue;
+
+			if(candidate_stat.st_dev == target_stat.st_dev && candidate_stat.st_ino == target_stat.st_ino) {
+				(void)sysdep<Close>(dir_handle);
+				if(path_length + 1 > size)
+					return ERANGE;
+				memcpy(buf, candidate_path, path_length + 1);
+				return 0;
+			}
+
+			if(!have_fallback && candidate_stat.st_rdev == target_stat.st_rdev) {
+				memcpy(fallback_path, candidate_path, path_length + 1);
+				have_fallback = true;
+			}
+		}
+	}
+
+	(void)sysdep<Close>(dir_handle);
+
+	if(!have_fallback)
+		return ENODEV;
+
+	size_t fallback_length = strlen(fallback_path);
+	if(fallback_length + 1 > size)
+		return ERANGE;
+	memcpy(buf, fallback_path, fallback_length + 1);
+	return 0;
+}
+
 int Sysdeps<Tcgetattr>::operator()(int fd, struct termios *attr) {
 	int result;
 	return sysdep<Ioctl>(fd, TCGETS, attr, &result);
@@ -919,6 +1290,98 @@ int Sysdeps<Poll>::operator()(struct pollfd *fds, nfds_t count, int timeout, int
 	return syscall_call(SYS_poll, fds, count, timeout).store(num_events);
 }
 
+int Sysdeps<Pselect>::operator()(int num_fds, fd_set *read_set, fd_set *write_set,
+		fd_set *except_set, const struct timespec *timeout, const sigset_t *sigmask, int *num_events) {
+	if(num_fds < 0 || !num_events)
+		return EINVAL;
+	if(num_fds > FD_SETSIZE)
+		return EINVAL;
+
+	int timeout_ms = -1;
+	if(timeout) {
+		if(timeout->tv_sec < 0 || timeout->tv_nsec < 0 || timeout->tv_nsec >= 1000000000L)
+			return EINVAL;
+
+		long long timeout_ll = static_cast<long long>(timeout->tv_sec) * 1000;
+		timeout_ll += (timeout->tv_nsec + 999999) / 1000000;
+		if(timeout_ll > INT_MAX)
+			timeout_ms = INT_MAX;
+		else
+			timeout_ms = static_cast<int>(timeout_ll);
+	}
+
+	int active_fds = 0;
+	for(int fd = 0; fd < num_fds; ++fd) {
+		if((read_set && local_fd_isset(fd, read_set))
+				|| (write_set && local_fd_isset(fd, write_set))
+				|| (except_set && local_fd_isset(fd, except_set)))
+			++active_fds;
+	}
+
+	pollfd *poll_fds = nullptr;
+	if(active_fds)
+		poll_fds = reinterpret_cast<pollfd *>(__builtin_alloca(active_fds * sizeof(pollfd)));
+
+	int current = 0;
+	for(int fd = 0; fd < num_fds; ++fd) {
+		short events = 0;
+		if(read_set && local_fd_isset(fd, read_set))
+			events |= POLLIN;
+		if(write_set && local_fd_isset(fd, write_set))
+			events |= POLLOUT;
+		if(except_set && local_fd_isset(fd, except_set))
+			events |= POLLPRI;
+		if(!events)
+			continue;
+
+		poll_fds[current].fd = fd;
+		poll_fds[current].events = events;
+		poll_fds[current].revents = 0;
+		++current;
+	}
+
+	if(read_set)
+		local_fd_zero(read_set);
+	if(write_set)
+		local_fd_zero(write_set);
+	if(except_set)
+		local_fd_zero(except_set);
+
+	int mask_error = 0;
+	sigset_t old_mask;
+	if(sigmask)
+		mask_error = sysdep<Sigprocmask>(SIG_SETMASK, sigmask, &old_mask);
+	if(mask_error)
+		return mask_error;
+
+	int poll_events = 0;
+	int poll_error = sysdep<Poll>(poll_fds, active_fds, timeout_ms, &poll_events);
+
+	int restore_error = 0;
+	if(sigmask)
+		restore_error = sysdep<Sigprocmask>(SIG_SETMASK, &old_mask, nullptr);
+
+	if(poll_error)
+		return poll_error;
+	if(restore_error)
+		return restore_error;
+
+	for(int index = 0; index < active_fds; ++index) {
+		int fd = poll_fds[index].fd;
+		short revents = poll_fds[index].revents;
+
+		if(read_set && (revents & (POLLIN | POLLHUP | POLLERR)))
+			local_fd_set(fd, read_set);
+		if(write_set && (revents & (POLLOUT | POLLERR)))
+			local_fd_set(fd, write_set);
+		if(except_set && (revents & POLLPRI))
+			local_fd_set(fd, except_set);
+	}
+
+	*num_events = poll_events;
+	return 0;
+}
+
 int Sysdeps<Pause>::operator()() {
 	auto ret = syscall_call(SYS_pause);
 	if(int e = ret.error(); e)
@@ -928,15 +1391,27 @@ int Sysdeps<Pause>::operator()() {
 }
 
 int Sysdeps<FutexWake>::operator()(int *, bool) {
-	SVR4_STUB();
+	//SVR4_STUB();
+	return 0;
 }
 
 int Sysdeps<FutexWait>::operator()(int *, int, const struct timespec *) {
-	SVR4_STUB();
+	//SVR4_STUB();
+	return 0;
 }
 
-int Sysdeps<ClockGet>::operator()(int, time_t *, long *) {
-	SVR4_STUB();
+int Sysdeps<ClockGet>::operator()(int clock, time_t* secs, long* nanos) {
+	if(!secs || !nanos)
+		return EINVAL;
+
+	switch(clock) {
+		case CLOCK_REALTIME:
+			return fetch_realtime(secs, nanos);
+		case CLOCK_MONOTONIC:
+			return fetch_monotonic(secs, nanos);
+		default:
+			return EINVAL;
+	}
 }
 
 int Sysdeps<Stat>::operator()(fsfd_target target, int dirfd, const char *path, int flags,

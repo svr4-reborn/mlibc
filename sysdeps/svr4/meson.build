@@ -21,6 +21,7 @@ libc_include_dirs += svr4_include_dirs
 
 rtld_sources += files(
 	normalized_cpu_family / 'arch-syscall.S',
+	normalized_cpu_family / 'signals.S',
 	'generic/sysdeps.cpp',
 )
 
@@ -29,6 +30,8 @@ libc_sources += files(
 	normalized_cpu_family / 'assembly-asserts.cpp',
 	normalized_cpu_family / 'signals.S',
 	'generic/entry.cpp',
+	'generic/mount.cpp',
+	'generic/mnttab.cpp',
 	'generic/sysdeps.cpp',
 )
 
@@ -93,6 +96,10 @@ if not no_headers
 	)
 
 	install_headers('include/syscall.h')
+	install_headers('include/sys/mount.h', subdir: 'sys')
+	install_headers('include/sys/mntent.h', subdir: 'sys')
+	install_headers('include/sys/mnttab.h', subdir: 'sys')
+	install_headers('include/sys/sysmacros.h', subdir: 'sys')
 	install_headers('include/sys/syscall.h', subdir: 'sys')
 	install_headers('include/bits/syscall.h', subdir: 'bits')
 endif

@@ -54,6 +54,15 @@
 
 #define FD_CLOEXEC 1
 
+// The kernel doesn't implement `fadvise`, but we need these for the POSIX interface.
+// The fadvise function will correctly return ENOSYS so it's not that bad.
+#define POSIX_FADV_NORMAL 0
+#define POSIX_FADV_RANDOM 1
+#define POSIX_FADV_SEQUENTIAL 2
+#define POSIX_FADV_WILLNEED 3
+#define POSIX_FADV_DONTNEED 4
+#define POSIX_FADV_NOREUSE 5
+
 #define AT_FDCWD -100
 #define AT_SYMLINK_NOFOLLOW 0x100
 #define AT_REMOVEDIR 0x200

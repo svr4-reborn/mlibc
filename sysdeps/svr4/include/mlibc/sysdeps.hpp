@@ -117,6 +117,7 @@ struct Svr4SysdepTags :
 	GetPgid,
 	GetSid,
 	Isatty,
+	Pselect,
 	SetEgid,
 	SetEuid,
 	SetGid,
@@ -125,6 +126,8 @@ struct Svr4SysdepTags :
 	SetSid,
 	SetUid,
 	Statvfs
+	,
+	Ttyname
 	,
 	Waitid,
 	Waitpid
