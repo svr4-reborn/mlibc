@@ -2065,4 +2065,23 @@ int Sysdeps<Msgsnd>::operator()(int msqid, const void *msgp, size_t msgsz, int m
 	return syscall_call(SYS_msgsys, kMsgsndSubcode, msqid, msgp, msgsz, msgflg).error();
 }
 
+#ifndef MLIBC_BUILDING_RTLD
+int Sysdeps<GetEntropy>::operator()(void *buffer, size_t length) {
+	int fd;
+	int error = sysdep<Open>("/dev/urandom", O_RDONLY, 0, &fd);
+	if(error)
+		mlibc::panicLogger() << "/dev/urandom open error " << strerror(error) << frg::endlog;
+
+	ssize_t bytes;
+	error = sysdep<Read>(fd, buffer, length, &bytes);
+	if(error) {
+		mlibc::infoLogger() << "/dev/urandom read error " << strerror(error) << frg::endlog;
+		return error;
+	}
+
+	sysdep<Close>(fd);
+	return 0;
+}
+#endif
+
 } // namespace mlibc

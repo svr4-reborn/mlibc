@@ -109,7 +109,8 @@ struct Svr4SysdepTags :
 	VmProtect,
 	VmUnmap,
 	Write,
-	Writev
+	Writev,
+	GetEntropy
 #ifdef __MLIBC_POSIX_OPTION
 	,
 	Fadvise,
