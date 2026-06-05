@@ -142,7 +142,11 @@ struct Svr4SysdepTags :
 	Statvfs,
 	Ttyname,
 	Waitid,
-	Waitpid
+	Waitpid,
+	ClockGetres,
+	GetPriority,
+	SetPriority,
+	ThreadSetname
 #endif
 {};
 

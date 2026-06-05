@@ -100,4 +100,73 @@ constexpr unsigned int first_selector_index = 7;
 constexpr unsigned int max_ldt_index = 8192;
 } // namespace tls
 
+namespace priocntl {
+
+constexpr int version = 1;
+constexpr int class_name_size = 16;
+constexpr int class_info_longs = 32 / sizeof(long);
+constexpr int class_parms_longs = 32 / sizeof(long);
+
+namespace command {
+constexpr int get_cid = 0;
+constexpr int set_parms = 2;
+constexpr int get_parms = 3;
+} // namespace command
+
+struct pcinfo {
+    id_t pc_cid;
+    char pc_clname[class_name_size];
+    long pc_clinfo[class_info_longs];
+};
+
+struct pcparms {
+    id_t pc_cid;
+    long pc_clparms[class_parms_longs];
+};
+
+} // namespace priocntl
+
+namespace procset {
+
+constexpr id_t myid = -1;
+
+namespace operation {
+constexpr int and_ = 1;
+} // namespace operation
+
+namespace idtype {
+constexpr int pid = 0;
+constexpr int pgid = 2;
+constexpr int cid = 4;
+constexpr int uid = 5;
+constexpr int all = 7;
+} // namespace idtype
+
+struct procset {
+    int p_op;
+    int p_lidtype;
+    id_t p_lid;
+    int p_ridtype;
+    id_t p_rid;
+};
+
+} // namespace procset
+
+namespace ts {
+
+constexpr int nice_zero = 20;
+constexpr int nice_min = -20;
+constexpr int nice_max = 19;
+
+struct parms {
+    short ts_uprilim;
+    short ts_upri;
+};
+
+struct info {
+    short ts_maxupri;
+};
+
+} // namespace ts
+
 } // namespace mlibc::svr4

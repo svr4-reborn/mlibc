@@ -170,6 +170,46 @@ struct syscall_ret2 {
 	}
 };
 
+#ifndef MLIBC_BUILDING_RTLD
+extern "C" long __mlibc_syscall0(long number) {
+	return __mlibc_syscall_ret(__do_syscall0(number));
+}
+
+extern "C" long __mlibc_syscall1(long number, __sc_word_t arg0) {
+	return __mlibc_syscall_ret(__do_syscall1(number, arg0));
+}
+
+extern "C" long __mlibc_syscall2(long number, __sc_word_t arg0, __sc_word_t arg1) {
+	return __mlibc_syscall_ret(__do_syscall2(number, arg0, arg1));
+}
+
+extern "C" long __mlibc_syscall3(long number, __sc_word_t arg0, __sc_word_t arg1,
+		__sc_word_t arg2) {
+	return __mlibc_syscall_ret(__do_syscall3(number, arg0, arg1, arg2));
+}
+
+extern "C" long __mlibc_syscall4(long number, __sc_word_t arg0, __sc_word_t arg1,
+		__sc_word_t arg2, __sc_word_t arg3) {
+	return __mlibc_syscall_ret(__do_syscall4(number, arg0, arg1, arg2, arg3));
+}
+
+extern "C" long __mlibc_syscall5(long number, __sc_word_t arg0, __sc_word_t arg1,
+		__sc_word_t arg2, __sc_word_t arg3, __sc_word_t arg4) {
+	return __mlibc_syscall_ret(__do_syscall5(number, arg0, arg1, arg2, arg3, arg4));
+}
+
+extern "C" long __mlibc_syscall6(long number, __sc_word_t arg0, __sc_word_t arg1,
+		__sc_word_t arg2, __sc_word_t arg3, __sc_word_t arg4, __sc_word_t arg5) {
+	return __mlibc_syscall_ret(__do_syscall6(number, arg0, arg1, arg2, arg3, arg4, arg5));
+}
+
+extern "C" long __mlibc_syscall7(long number, __sc_word_t arg0, __sc_word_t arg1,
+		__sc_word_t arg2, __sc_word_t arg3, __sc_word_t arg4, __sc_word_t arg5,
+		__sc_word_t arg6) {
+	return __mlibc_syscall_ret(__do_syscall7(number, arg0, arg1, arg2, arg3, arg4, arg5, arg6));
+}
+#endif
+
 constexpr bool syscall_should_restart(long number) {
 	switch(number) {
 		case SYS_read:
@@ -698,6 +738,65 @@ void local_fd_set(int fd, fd_set *set) {
 
 void local_fd_zero(fd_set *set) {
 	memset(set->fds_bits, 0, sizeof(set->fds_bits));
+}
+
+int get_ts_class(id_t *cid, short *max_upri) {
+    abi::priocntl::pcinfo info{};
+    memcpy(info.pc_clname, "TS", 3);
+
+    if(int e = syscall_call(SYS_priocntlsys, abi::priocntl::version,
+            static_cast<abi::procset::procset *>(nullptr),
+            abi::priocntl::command::get_cid, &info).error(); e)
+        return e;
+
+    auto ts_info = reinterpret_cast<abi::ts::info *>(info.pc_clinfo);
+    *cid = info.pc_cid;
+    *max_upri = ts_info->ts_maxupri;
+    return 0;
+}
+
+int translate_priority_which(int which, int *kernel_idtype) {
+    switch(which) {
+        case PRIO_PROCESS:
+            *kernel_idtype = abi::procset::idtype::pid;
+            return 0;
+        case PRIO_PGRP:
+            *kernel_idtype = abi::procset::idtype::pgid;
+            return 0;
+        case PRIO_USER:
+            *kernel_idtype = abi::procset::idtype::uid;
+            return 0;
+        default:
+            return EINVAL;
+    }
+}
+
+abi::procset::procset make_ts_priority_procset(int kernel_idtype, id_t who, id_t ts_cid) {
+    return abi::procset::procset{
+        .p_op = abi::procset::operation::and_,
+        .p_lidtype = kernel_idtype,
+        .p_lid = who ? who : abi::procset::myid,
+        .p_ridtype = abi::procset::idtype::cid,
+        .p_rid = ts_cid,
+    };
+}
+
+short posix_priority_to_ts_upri(int prio, short max_upri) {
+    if(prio < abi::ts::nice_min)
+        prio = abi::ts::nice_min;
+    if(prio > abi::ts::nice_max)
+        prio = abi::ts::nice_max;
+
+    int kernel_nice = prio + abi::ts::nice_zero;
+    return static_cast<short>(
+            -((kernel_nice - abi::ts::nice_zero) * max_upri) / abi::ts::nice_zero);
+}
+
+int ts_upri_to_posix_priority(short upri, short max_upri) {
+    int kernel_nice = abi::ts::nice_zero - (upri * abi::ts::nice_zero) / max_upri;
+    if(kernel_nice == 2 * abi::ts::nice_zero)
+        kernel_nice = 2 * abi::ts::nice_zero - 1;
+    return kernel_nice - abi::ts::nice_zero;
 }
 
 } // namespace
@@ -1600,6 +1699,21 @@ int Sysdeps<ClockGet>::operator()(int clock, time_t* secs, long* nanos) {
 	}
 }
 
+int Sysdeps<ClockGetres>::operator()(int clock, time_t* secs, long* nanos) {
+	if(!secs || !nanos)
+		return EINVAL;
+
+	switch(clock) {
+		case CLOCK_REALTIME:
+		case CLOCK_MONOTONIC:
+			*secs = 0;
+			*nanos = 1;
+			return 0;
+		default:
+			return EINVAL;
+	}
+}
+
 int Sysdeps<GetItimer>::operator()(int which, struct itimerval *curr_value) {
 	if(!curr_value)
 		return EINVAL;
@@ -1797,6 +1911,62 @@ int Sysdeps<Msgrcv>::operator()(int msqid, void *msgp, size_t msgsz, long msgtyp
 
 int Sysdeps<Msgsnd>::operator()(int msqid, const void *msgp, size_t msgsz, int msgflg) {
 	return syscall_call(SYS_msgsys, abi::msgsys::msgsnd, msqid, msgp, msgsz, msgflg).error();
+}
+
+int Sysdeps<GetPriority>::operator()(int which, id_t who, int *value) {
+    if(!value)
+        return EINVAL;
+
+    int kernel_idtype;
+    if(int e = translate_priority_which(which, &kernel_idtype); e)
+        return e;
+
+    id_t ts_cid;
+    short max_upri;
+    if(int e = get_ts_class(&ts_cid, &max_upri); e)
+        return e;
+
+    auto procset = make_ts_priority_procset(kernel_idtype, who, ts_cid);
+
+    abi::priocntl::pcparms parms{};
+    parms.pc_cid = ts_cid;
+
+    if(int e = syscall_call(SYS_priocntlsys, abi::priocntl::version, &procset,
+            abi::priocntl::command::get_parms, &parms).error(); e)
+        return e;
+
+    auto ts_parms = reinterpret_cast<abi::ts::parms *>(parms.pc_clparms);
+    *value = ts_upri_to_posix_priority(ts_parms->ts_upri, max_upri);
+    return 0;
+}
+
+int Sysdeps<SetPriority>::operator()(int which, id_t who, int prio) {
+    int kernel_idtype;
+    if(int e = translate_priority_which(which, &kernel_idtype); e)
+        return e;
+
+    id_t ts_cid;
+    short max_upri;
+    if(int e = get_ts_class(&ts_cid, &max_upri); e)
+        return e;
+
+    abi::ts::parms ts_parms{};
+    ts_parms.ts_upri = posix_priority_to_ts_upri(prio, max_upri);
+    ts_parms.ts_uprilim = ts_parms.ts_upri;
+
+    abi::priocntl::pcparms parms{};
+    parms.pc_cid = ts_cid;
+    static_assert(sizeof(ts_parms) <= sizeof(parms.pc_clparms));
+    memcpy(parms.pc_clparms, &ts_parms, sizeof(ts_parms));
+
+    auto procset = make_ts_priority_procset(kernel_idtype, who, ts_cid);
+    return syscall_call(SYS_priocntlsys, abi::priocntl::version, &procset,
+            abi::priocntl::command::set_parms, &parms).error();
+}
+
+int Sysdeps<ThreadSetname>::operator()(void *tcb, const char *name) {
+	mlibc::infoLogger() << "ThreadSetname is stubbed on SVR4, ignoring name " << name << frg::endlog;
+	return 0;
 }
 
 #ifndef MLIBC_BUILDING_RTLD
