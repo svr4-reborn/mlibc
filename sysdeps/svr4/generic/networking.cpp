@@ -1189,6 +1189,49 @@ int Sysdeps<Sendto>::operator()(int fd, const void *buffer, size_t size, int fla
 	return syscall_call(SYS_write, fd, buffer, size).store(length);
 }
 
+int Sysdeps<MsgRecv>::operator()(int fd, struct msghdr *msg, int flags, ssize_t *length) {
+	int e = 0;
+	if (flags & ~(MSG_PEEK | MSG_OOB)) {
+		e = EOPNOTSUPP;
+	} else if (flags) {
+		if (msg->msg_iovlen == 1) {
+			e = receive_peek_or_oob(fd, msg->msg_iov[0].iov_base, msg->msg_iov[0].iov_len, flags, length);
+		} else {
+			e = EOPNOTSUPP;
+		}
+	} else if (msg->msg_name && msg->msg_namelen) {
+		if (msg->msg_iovlen == 1) {
+			socklen_t addr_len = msg->msg_namelen;
+			e = recv_with_name(fd, msg->msg_iov[0].iov_base, msg->msg_iov[0].iov_len,
+				reinterpret_cast<struct sockaddr *>(msg->msg_name), &addr_len, length);
+			msg->msg_namelen = addr_len;
+		} else {
+			msg->msg_namelen = 0;
+			e = syscall_call(SYS_readv, fd, msg->msg_iov, msg->msg_iovlen).store(length);
+		}
+	} else {
+		e = syscall_call(SYS_readv, fd, msg->msg_iov, msg->msg_iovlen).store(length);
+	}
+	return e;
+}
+
+int Sysdeps<MsgSend>::operator()(int fd, const struct msghdr *msg, int flags, ssize_t *length) {
+	int e = 0;
+	if (flags & ~MSG_DONTROUTE) {
+		e = EOPNOTSUPP;
+	} else if (msg->msg_name) {
+		if (msg->msg_iovlen == 1) {
+			e = Sysdeps<Sendto>()(fd, msg->msg_iov[0].iov_base, msg->msg_iov[0].iov_len, flags,
+				reinterpret_cast<const struct sockaddr *>(msg->msg_name), msg->msg_namelen, length);
+		} else {
+			e = EOPNOTSUPP;
+		}
+	} else {
+		e = syscall_call(SYS_writev, fd, msg->msg_iov, msg->msg_iovlen).store(length);
+	}
+	return e;
+}
+
 int Sysdeps<Shutdown>::operator()(int sockfd, int how) {
 	return stream_ioctl(sockfd, kSiShutdown, &how, sizeof(how));
 }

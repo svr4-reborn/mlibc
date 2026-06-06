@@ -43,6 +43,8 @@ struct Svr4SysdepTags :
 	Msgget,
 	Msgrcv,
 	Msgsnd,
+	MsgRecv,
+	MsgSend,
 	LibcLog,
 	LibcPanic,
 	Link,
