@@ -1866,6 +1866,22 @@ int Sysdeps<Fchmodat>::operator()(int dirfd, const char *pathname, mode_t mode, 
 	return sysdep<Chmod>(pathname, mode);
 }
 
+int Sysdeps<Fchownat>::operator()(int dirfd, const char *pathname, uid_t owner, gid_t group, int flags) {
+	if(flags & ~(AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH))
+		return EINVAL;
+	if(pathname && *pathname == '\0' && (flags & AT_EMPTY_PATH)) {
+		return syscall_call(SYS_fchown, dirfd, owner, group).error();
+	}
+	if(flags & AT_SYMLINK_NOFOLLOW) {
+		if(int e = require_at_path(dirfd, pathname); e)
+			return e;
+		return syscall_call(SYS_lchown, pathname, owner, group).error();
+	}
+	if(int e = require_at_path(dirfd, pathname); e)
+		return e;
+	return syscall_call(SYS_chown, pathname, owner, group).error();
+}
+
 int Sysdeps<Unlinkat>::operator()(int dirfd, const char *path, int flags) {
 	if(flags & ~AT_REMOVEDIR)
 		return EINVAL;

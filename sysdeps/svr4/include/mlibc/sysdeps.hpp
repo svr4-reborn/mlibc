@@ -22,6 +22,7 @@ struct Svr4SysdepTags :
 	Fcntl,
 	Fchmod,
 	Fchmodat,
+	Fchownat,
 	Fchdir,
 	Fdatasync,
 	Fsync,
