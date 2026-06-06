@@ -1412,9 +1412,9 @@ int Sysdeps<Ioctl>::operator()(int fd, unsigned long request, void *arg, int *re
 int Sysdeps<Isatty>::operator()(int fd) {
 	struct termios termios_hack;
 	if(int e = syscall_call(SYS_ioctl, fd, TCGETS, &termios_hack).error(); e) {
-		if(e == EBADF)
-			return EBADF;
-		return ENOTTY;
+		if(e == EINVAL || e == ENOSTR)
+			return ENOTTY;
+		return e;
 	}
 	return 0;
 }
@@ -1814,6 +1814,18 @@ int Sysdeps<Mkdirat>::operator()(int dirfd, const char *path, mode_t mode) {
 	if(int e = require_at_path(dirfd, path); e)
 		return e;
 	return sysdep<Mkdir>(path, mode);
+}
+
+int Sysdeps<Mkfifoat>::operator()(int dirfd, const char *path, mode_t mode) {
+	if(int e = require_at_path(dirfd, path); e)
+		return e;
+	return syscall_call(SYS_xmknod, 2, path, mode | S_IFIFO, 0).error();
+}
+
+int Sysdeps<Mknodat>::operator()(int dirfd, const char *path, int mode, int dev) {
+	if(int e = require_at_path(dirfd, path); e)
+		return e;
+	return syscall_call(SYS_xmknod, 2, path, mode, dev).error();
 }
 
 int Sysdeps<Linkat>::operator()(int olddirfd, const char *old_path, int newdirfd, const char *new_path, int flags) {

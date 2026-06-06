@@ -51,6 +51,8 @@ struct Svr4SysdepTags :
 	Linkat,
 	Mkdir,
 	Mkdirat,
+	Mkfifoat,
+	Mknodat,
 	Nice,
 	Execve,
 	Open,
