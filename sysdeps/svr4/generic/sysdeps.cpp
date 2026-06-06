@@ -1412,9 +1412,9 @@ int Sysdeps<Ioctl>::operator()(int fd, unsigned long request, void *arg, int *re
 int Sysdeps<Isatty>::operator()(int fd) {
 	struct termios termios_hack;
 	if(int e = syscall_call(SYS_ioctl, fd, TCGETS, &termios_hack).error(); e) {
-		if(e == EINVAL || e == ENOSTR)
-			return ENOTTY;
-		return e;
+		if(e == EBADF)
+			return EBADF;
+		return ENOTTY;
 	}
 	return 0;
 }
