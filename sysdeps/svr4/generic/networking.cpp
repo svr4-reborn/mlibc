@@ -16,6 +16,7 @@
 #include <bits/syscall.h>
 #include <netinet/in.h>
 #include <mlibc/all-sysdeps.hpp>
+#include <mlibc/debug.hpp>
 
 namespace {
 
@@ -124,6 +125,8 @@ constexpr int kTransportErrorAck = 18;
 constexpr int kTransportOkAck = 19;
 constexpr int kTransportUnitdataIndication = 20;
 constexpr int kTransportOptionManagementAck = 22;
+
+constexpr int kRsHiPri = 0x01;
 
 constexpr int kTiOptionManagement = ('T' << 8) | 141;
 constexpr int kTiBind = ('T' << 8) | 142;
@@ -318,8 +321,10 @@ void remember_socket(int fd, int family, int type) {
 bool lookup_socket(int fd, int *family, int *type) {
 	if(fd < 0 || fd >= kTrackedSocketLimit || !tracked_sockets[fd].valid)
 		return false;
-	*family = tracked_sockets[fd].family;
-	*type = tracked_sockets[fd].type;
+	if(family)
+		*family = tracked_sockets[fd].family;
+	if(type)
+		*type = tracked_sockets[fd].type;
 	return true;
 }
 
@@ -626,23 +631,24 @@ int bind_unix_transport(int fd, const struct sockaddr *addr_ptr, socklen_t addr_
 	unix_bind_buffer buffer{};
 	buffer.request.PRIM_type = kTransportBindRequest;
 	buffer.request.CONIND_number = backlog;
-	buffer.request.ADDR_length = sizeof(buffer.address);
-	buffer.request.ADDR_offset = offsetof(unix_bind_buffer, address);
 
 	bool created = false;
 	unix_path path;
+	int length;
 	if(addr_ptr) {
+		buffer.request.ADDR_length = sizeof(buffer.address);
+		buffer.request.ADDR_offset = offsetof(unix_bind_buffer, address);
 		if(int e = prepare_unix_transport_address(addr_ptr, addr_length, true,
 				&buffer.address, &path, &created); e)
 			return e;
+		length = sizeof(T_bind_req) + buffer.request.ADDR_length;
 	} else {
-		sockaddr_un unnamed{};
-		unnamed.sun_family = AF_UNIX;
-		copy_unix_name(reinterpret_cast<sockaddr *>(&unnamed), sizeof(sa_family_t),
-			&buffer.address.name);
+		buffer.request.ADDR_length = sizeof(buffer.address);
+		buffer.request.ADDR_offset = offsetof(unix_bind_buffer, address);
+		buffer.address.name.sun_family = AF_UNIX;
+		length = sizeof(T_bind_req) + buffer.request.ADDR_length;
 	}
 
-	int length = sizeof(T_bind_req) + buffer.request.ADDR_length;
 	int e = stream_ioctl(fd, kTiBind, &buffer, length);
 	if(e && created)
 		(void)syscall_call(SYS_unlink, path.path);
@@ -1105,22 +1111,93 @@ int Sysdeps<Accept>::operator()(int fd, int *newfd, struct sockaddr *addr_ptr, s
 	insert.offset = offsetof(T_conn_res, QUEUE_ptr);
 	if(int e = syscall_call(SYS_ioctl, fd, I_FDINSERT, &insert).error(); e) {
 		(void)syscall_call(SYS_close, accepted_fd);
+		mlibc::infoLogger() << "mlibc: Accept(" << fd << ") I_FDINSERT error: " << e << frg::endlog;
 		return e;
+	}
+
+	// accept() consumes a T_CONN_IND, sends T_CONN_RES, and then waits for the local
+	// T_OK_ACK/T_ERROR_ACK response from the transport provider on the listener socket.
+	// We temporarily disable non-blocking on the listener socket to block on this
+	// acknowledgment, matching SVR4 libsocket's behavior.
+	{
+		long flags_val = 0;
+		bool clear_nonblock = false;
+		if(syscall_call(SYS_fcntl, fd, F_GETFL, 0).store(&flags_val) == 0) {
+			if(flags_val & O_NONBLOCK) {
+				clear_nonblock = true;
+				(void)syscall_call(SYS_fcntl, fd, F_SETFL, flags_val & ~O_NONBLOCK);
+			}
+		}
+
+		int err = 0;
+		for(;;) {
+			char control[sizeof(T_error_ack)] = {};
+			strbuf ctlbuf{static_cast<int>(sizeof(control)), 0, control};
+			strbuf databuf{-1, 0, nullptr};
+			int getmsg_flags = kRsHiPri;
+			if(int e = syscall_call(SYS_getmsg, fd, &ctlbuf, &databuf, &getmsg_flags).error(); e) {
+				if(e == EINTR)
+					continue;
+				err = e;
+				break;
+			}
+
+			if(ctlbuf.len < static_cast<int>(sizeof(long))) {
+				err = EPROTO;
+				break;
+			}
+
+			long primitive = *reinterpret_cast<long *>(control);
+			if(primitive == kTransportOkAck) {
+				auto ack = reinterpret_cast<T_ok_ack *>(control);
+				if(ctlbuf.len < static_cast<int>(sizeof(T_ok_ack)) || ack->CORRECT_prim != kTransportConnectResponse)
+					err = EPROTO;
+				break;
+			} else if(primitive == kTransportErrorAck) {
+				auto ack = reinterpret_cast<T_error_ack *>(control);
+				if(ctlbuf.len < static_cast<int>(sizeof(T_error_ack)) || ack->ERROR_prim != kTransportConnectResponse) {
+					err = EPROTO;
+				} else {
+					err = tpi_error(ack);
+				}
+				break;
+			} else {
+				err = EPROTO;
+				break;
+			}
+		}
+
+		if(clear_nonblock) {
+			(void)syscall_call(SYS_fcntl, fd, F_SETFL, flags_val);
+		}
+
+		if(err) {
+			(void)syscall_call(SYS_close, accepted_fd);
+			mlibc::infoLogger() << "mlibc: Accept(" << fd << ") TPI ack error: " << err << frg::endlog;
+			return err;
+		}
 	}
 
 	copy_sockaddr_out(control + indication->SRC_offset,
 		static_cast<socklen_t>(indication->SRC_length), addr_ptr, addr_length);
 	remember_socket(accepted_fd, family, type);
 	*newfd = accepted_fd;
+	mlibc::infoLogger() << "mlibc: Accept(" << fd << ") success accepted_fd=" << accepted_fd << frg::endlog;
 	return 0;
 }
 
 int Sysdeps<Bind>::operator()(int fd, const struct sockaddr *addr_ptr, socklen_t addr_length) {
-	return bind_transport(fd, addr_ptr, addr_length, 0);
+	mlibc::infoLogger() << "mlibc: Bind(" << fd << ") family=" << (addr_ptr ? addr_ptr->sa_family : -1) << frg::endlog;
+	int e = bind_transport(fd, addr_ptr, addr_length, 0);
+	mlibc::infoLogger() << "mlibc: Bind(" << fd << ") returned " << e << frg::endlog;
+	return e;
 }
 
 int Sysdeps<Connect>::operator()(int fd, const struct sockaddr *addr_ptr, socklen_t addr_length) {
-	return connect_transport(fd, addr_ptr, addr_length);
+	mlibc::infoLogger() << "mlibc: Connect(" << fd << ") family=" << (addr_ptr ? addr_ptr->sa_family : -1) << frg::endlog;
+	int e = connect_transport(fd, addr_ptr, addr_length);
+	mlibc::infoLogger() << "mlibc: Connect(" << fd << ") returned " << e << frg::endlog;
+	return e;
 }
 
 int Sysdeps<Sockname>::operator()(int fd, struct sockaddr *addr_ptr, socklen_t max_addr_length,
@@ -1238,6 +1315,27 @@ int Sysdeps<Shutdown>::operator()(int sockfd, int how) {
 
 int Sysdeps<Sockatmark>::operator()(int sockfd, int *out) {
 	return syscall_call(SYS_ioctl, sockfd, kSiocAtmark, out).error();
+}
+
+extern "C" {
+	extern bool (*mlibc_is_socket_ptr)(int fd);
+	extern void (*mlibc_clear_socket_ptr)(int fd);
+}
+
+static bool local_is_socket(int fd) {
+	int family, type;
+	return lookup_socket(fd, &family, &type);
+}
+
+static void local_clear_socket(int fd) {
+	if(fd >= 0 && fd < kTrackedSocketLimit)
+		tracked_sockets[fd].valid = false;
+}
+
+__attribute__((constructor))
+static void init_is_socket_ptr() {
+	mlibc_is_socket_ptr = local_is_socket;
+	mlibc_clear_socket_ptr = local_clear_socket;
 }
 
 } // namespace mlibc

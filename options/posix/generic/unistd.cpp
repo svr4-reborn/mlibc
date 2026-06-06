@@ -261,6 +261,8 @@ int fexecve(int fd, char *const argv[], char *const envp[]) {
 
 long fpathconf(int, int name) {
 	switch (name) {
+	case _PC_LINK_MAX:
+		return 1000;
 	case _PC_NAME_MAX:
 		return NAME_MAX;
 	case _PC_FILESIZEBITS:
@@ -611,6 +613,8 @@ int nice(int nice) {
 
 long pathconf(const char *, int name) {
 	switch (name) {
+	case _PC_LINK_MAX:
+		return 1000;
 	case _PC_NAME_MAX:
 		return NAME_MAX;
 	case _PC_FILESIZEBITS:

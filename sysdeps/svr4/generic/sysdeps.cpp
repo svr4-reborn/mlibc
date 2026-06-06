@@ -921,6 +921,9 @@ int Sysdeps<Rename>::operator()(const char *path, const char *new_path) {
 	return syscall_call(SYS_rename, path, new_path).error();
 }
 
+extern "C" bool (*mlibc_is_socket_ptr)(int fd) = nullptr;
+extern "C" void (*mlibc_clear_socket_ptr)(int fd) = nullptr;
+
 int Sysdeps<Read>::operator()(int fd, void *buffer, size_t count, ssize_t *bytes_read) {
 	return syscall_call(SYS_read, fd, buffer, count).store(bytes_read);
 }
