@@ -151,7 +151,9 @@ struct Svr4SysdepTags :
 	ClockGetres,
 	GetPriority,
 	SetPriority,
-	ThreadSetname
+	ThreadSetname,
+	Unlockpt,
+	Ptsname
 #endif
 {};
 

@@ -58,4 +58,6 @@
 #define S_WRBAND     0x0100
 #define S_BANDURG    0x0200
 
+#define UNLKPT  (('P'<<8)|2) /* unlock PTY */
+
 #endif /* _ABIBITS_IOCTLS_H */

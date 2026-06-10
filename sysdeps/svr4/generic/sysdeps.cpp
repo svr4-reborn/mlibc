@@ -4,7 +4,9 @@
 #include <poll.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/sysmacros.h>
 #include <sys/select.h>
+#include <stdio.h>
 
 #include <type_traits>
 
@@ -2000,7 +2002,27 @@ int Sysdeps<ThreadSetname>::operator()(void *tcb, const char *name) {
 	return 0;
 }
 
+int Sysdeps<Unlockpt>::operator()(int fd) {
+    int result;
+    if(int e = sysdep<Ioctl>(fd, UNLKPT, nullptr, &result); e)
+        return e;
+
+    return 0;
+}
+
 #ifndef MLIBC_BUILDING_RTLD
+int Sysdeps<Ptsname>::operator()(int fd, char *buffer, size_t length) {
+    struct stat st;
+    if(int e = sysdep<Stat>(fsfd_target::fd, fd, nullptr, 0, &st); e)
+        return e;
+
+    int index = getminor(st.st_rdev);
+    if((size_t)snprintf(buffer, length, "/dev/pts/%d", index) >= length)
+        return ERANGE;
+
+    return 0;
+}
+
 int Sysdeps<GetEntropy>::operator()(void *buffer, size_t length) {
 	int fd;
 	int error = sysdep<Open>("/dev/urandom", O_RDONLY, 0, &fd);
