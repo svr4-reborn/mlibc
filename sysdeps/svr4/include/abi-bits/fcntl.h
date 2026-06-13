@@ -18,8 +18,10 @@
 #define O_TRUNC 0x200
 #define O_EXCL 0x400
 #define O_NOCTTY 0x800
-#define O_CLOEXEC 0x2000000
-#define O_NOFOLLOW 0x4000000
+
+#define O_CLOEXEC 0x2000000 /* TODO: implement this in the kernel */
+#define O_NOFOLLOW 0x4000000 /* TODO: implement this in the kernel */
+#define O_DIRECTORY 0x8000000 /* TODO: implement this in the kernel */
 
 #define F_DUPFD  0
 #define F_GETFD  1
