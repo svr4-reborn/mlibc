@@ -11,6 +11,10 @@
 #   include <sys/ttydefaults.h>
 #endif
 
+#if defined(TIOCGWINSZ) || defined(TIOCSWINSZ)
+#	include <bits/winsize.h>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
