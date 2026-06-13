@@ -298,7 +298,7 @@ elif host_machine.system() == 'zinnia'
 	internal_conf.set10('MLIBC_MMAP_ALLOCATE_DSO', true)
 	internal_conf.set10('MLIBC_MAP_FILE_WINDOWS', true)
 	subdir('sysdeps/zinnia')
-elif host_machine.system() == 'svr4'
+elif host_machine.system() == 'svr4' or host_machine.system() == 'sysv4'
 	provides_bits_syscall_h = true
 	rtld_include_dirs += include_directories('sysdeps/svr4/include')
 	libc_include_dirs += include_directories('sysdeps/svr4/include')
@@ -566,7 +566,9 @@ if not headers_only
 		cpp_link_args = get_option('cpp_link_args')
 		libgcc_path = run_command(cpp_compiler.cmd_array(), cpp_link_args, '-print-libgcc-file-name',
 							capture: true, check: true).stdout().strip()
-
+		search_paths = run_command(cpp_compiler.cmd_array(), cpp_link_args, '-print-search-dirs', capture: true, check: true).stdout().strip()
+		message('Using libgcc/compiler-rt library from compiler: ' + libgcc_path)
+		message('Compiler search paths:\n' + search_paths)
 		if not fs.is_file(libgcc_path)
 			error('libgcc/compiler-rt library (' + libgcc_path + ') is missing')
 		endif
