@@ -901,7 +901,7 @@ void ObjectRepository::_parseDynamic(SharedObject *object) {
 		case DT_RELA: case DT_RELASZ: case DT_RELAENT: case DT_RELACOUNT:
 		case DT_REL: case DT_RELSZ: case DT_RELENT: case DT_RELCOUNT:
 		case DT_RELR: case DT_RELRSZ: case DT_RELRENT:
-#ifdef __riscv
+#if defined(__riscv) || defined(__SYSV4)
 		case DT_TEXTREL: // Work around https://sourceware.org/bugzilla/show_bug.cgi?id=24673.
 #endif
 			break;
@@ -912,7 +912,8 @@ void ObjectRepository::_parseDynamic(SharedObject *object) {
 			if((dynamic->d_tag < DT_LOOS || dynamic->d_tag > DT_HIOS)
 			&& (dynamic->d_tag < DT_LOPROC || dynamic->d_tag > DT_HIPROC)) {
 				mlibc::panicLogger() << "Unexpected dynamic entry "
-					<< (void *)dynamic->d_tag << " in object" << frg::endlog;
+					<< (void *)dynamic->d_tag << " in object " << object->name
+					<< frg::endlog;
 			}
 		}
 	}
